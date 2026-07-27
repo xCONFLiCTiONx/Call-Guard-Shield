@@ -86,6 +86,7 @@ fun PermissionScreen(
 
         Scaffold(
             modifier = Modifier.fillMaxSize(),
+            containerColor = Color.Black, // Explicitly black as requested
             bottomBar = {
                 Column(
                     modifier = Modifier

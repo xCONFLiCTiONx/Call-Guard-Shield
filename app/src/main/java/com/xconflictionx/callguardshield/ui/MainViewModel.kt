@@ -69,8 +69,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun refreshBatteryStatus() {
-        val pm = getApplication<Application>().getSystemService(android.content.Context.POWER_SERVICE) as android.os.PowerManager
-        _isIgnoringBatteryOptimizations.value = pm.isIgnoringBatteryOptimizations(getApplication<Application>().packageName)
+        try {
+            val pm = getApplication<Application>().getSystemService(android.content.Context.POWER_SERVICE) as android.os.PowerManager
+            _isIgnoringBatteryOptimizations.value = pm.isIgnoringBatteryOptimizations(getApplication<Application>().packageName)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to refresh battery status", e)
+        }
     }
 
     fun requestIgnoreBatteryOptimizations(context: android.content.Context) {

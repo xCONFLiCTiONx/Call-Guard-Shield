@@ -74,25 +74,10 @@ class GeminiPhoneLookupService(
             Task: Investigate reputation and identity for: $number ($region).
             Targets: Check public directories, spam databases (800notes, who-called), and official brand sites.
             
-            Output: Return a JSON object with these EXACT fields:
-            {
-              "ownerName": "string",
-              "companyName": "string",
-              "category": "string (Personal, Business, Scam, Telemarketer)",
-              "confidence": decimal (0.0 to 1.0),
-              "spam": boolean,
-              "scam": boolean,
-              "debtCollector": boolean,
-              "telemarketer": boolean,
-              "summary": "Detailed verification logic and findings",
-              "evidence": ["Point 1", "Point 2", "Point 3"],
-              "sources": ["source1.com", "source2.com"],
-              "lastVerified": "Date string"
-            }
-            Use "Unknown" for missing strings. Ensure 'evidence' has at least 2 technical data points.
+            Output: Return a JSON object with fields: ownerName, companyName, category, confidence (0.0-1.0), summary, evidence (list), sources (list).
         """.trimIndent()
 
-        rotateModelsAndExecute(prompt, number)
+        executeSingleModelRequest(prompt, number)
     }
 
     suspend fun lookupDeep(number: String): PhoneLookupResult? = withContext(Dispatchers.IO) {
@@ -103,47 +88,60 @@ class GeminiPhoneLookupService(
             Cross-reference WhitePages, 800-notes, and the FCC database specifically.
             Identify if this is a "Hot Range" number often used for robocalls.
             
-            Output: Return JSON with the full schema including detailed 'evidence' and 'summary' explaining why this deep scan is more reliable.
+            Output: Return JSON with full schema including 'evidence' and 'summary' explaining why this deep scan is more reliable.
         """.trimIndent()
 
-        rotateModelsAndExecute(prompt, number)
+        executeSingleModelRequest(prompt, number)
     }
 
-    private suspend fun rotateModelsAndExecute(prompt: String, number: String): PhoneLookupResult? {
-        val modelsToTry = listOf(modelName, "gemini-flash-latest", "gemini-2.0-flash", "gemini-pro-latest")
-            .filter { it.isNotBlank() }.distinct()
-
+    private suspend fun executeSingleModelRequest(prompt: String, number: String): PhoneLookupResult? {
+        // LOCK to exactly what is in settings. No fallbacks to restricted models.
+        val target = if (modelName.isBlank()) "gemini-flash-latest" else modelName
+        val url = "https://generativelanguage.googleapis.com/v1beta/models/$target:generateContent?key=$apiKey"
+        
+        val searchModes = listOf(true, false)
         var lastError: Exception? = null
 
-        for (target in modelsToTry) {
-            val searchModes = listOf(true, false)
-            for (useSearch in searchModes) {
-                try {
-                    val request = GeminiRequest(
-                        contents = listOf(GeminiContent(parts = listOf(GeminiPart(text = prompt)))),
-                        systemInstruction = GeminiContent(parts = listOf(GeminiPart(text = systemInstructionText))),
-                        tools = if (useSearch) listOf(GeminiTool(googleSearchRetrieval = emptyMap())) else null,
-                        generationConfig = GeminiGenerationConfig(responseMimeType = "application/json")
-                    )
+        for (useSearch in searchModes) {
+            try {
+                Log.d(TAG, "Executing Request: model=$target, search=$useSearch")
+                val request = GeminiRequest(
+                    contents = listOf(GeminiContent(parts = listOf(GeminiPart(text = prompt)))),
+                    systemInstruction = GeminiContent(parts = listOf(GeminiPart(text = systemInstructionText))),
+                    tools = if (useSearch) listOf(GeminiTool(googleSearchRetrieval = emptyMap())) else null,
+                    generationConfig = GeminiGenerationConfig(responseMimeType = "application/json")
+                )
 
-                    val url = "https://generativelanguage.googleapis.com/v1beta/models/$target:generateContent?key=$apiKey"
-                    val response = api.generateContent(url, request)
-                    val json = response.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text ?: continue
-                    
-                    val cleanJson = json.trim().removePrefix("```json").removeSuffix("```").trim()
-                    val result = Gson().fromJson(cleanJson, PhoneLookupResult::class.java)
+                val response = api.generateContent(url, request)
+                val json = response.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text ?: continue
+                
+                val cleanJson = json.trim().removePrefix("```json").removeSuffix("```").trim()
+                val result = Gson().fromJson(cleanJson, PhoneLookupResult::class.java)
 
-                    return result.copy(phoneNumber = number, lookupDate = System.currentTimeMillis())
-                } catch (e: Exception) {
-                    lastError = e
-                    if (e is HttpException && e.code() == 429) {
-                        Log.w(TAG, "Quota hit on $target. Waiting 2.5s...")
+                return result.copy(phoneNumber = number, lookupDate = System.currentTimeMillis())
+            } catch (e: Exception) {
+                lastError = e
+                val errorBody = (e as? HttpException)?.response()?.errorBody()?.string()
+                
+                if (e is HttpException && e.code() == 429) {
+                    if (useSearch) {
+                        Log.w(TAG, "Search tool busy. Waiting 2.5s and retrying without search.")
                         delay(2500)
-                        if (useSearch) continue 
+                        continue 
                     }
-                    if (e is HttpException && e.code() == 404) break 
-                    break 
                 }
+
+                // If it's a 404 or a 429 without search, parse the REAL error message and throw it.
+                if (!errorBody.isNullOrBlank()) {
+                    try {
+                        val errorJson = Gson().fromJson(errorBody, GeminiErrorResponse::class.java)
+                        val msg = errorJson.error?.message
+                        if (!msg.isNullOrBlank()) throw Exception(msg)
+                    } catch (parseEx: Exception) {
+                        // ignore and use the original error
+                    }
+                }
+                break 
             }
         }
         if (lastError != null) throw lastError
@@ -162,4 +160,7 @@ class GeminiPhoneLookupService(
     data class GeminiGenerationConfig(val responseMimeType: String)
     data class GeminiResponse(val candidates: List<GeminiCandidate>?)
     data class GeminiCandidate(val content: GeminiContent?)
+
+    data class GeminiErrorResponse(val error: GeminiErrorDetail?)
+    data class GeminiErrorDetail(val code: Int, val message: String, val status: String)
 }
