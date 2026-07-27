@@ -78,6 +78,22 @@ fun MainApp() {
         Icons.Default.Settings
     )
 
+    // Centralized navigation logic
+    val navTo: (String, Int) -> Unit = { route, index ->
+        if (selectedItem == index) {
+            // If already on this tab, pop to the root of the tab to "reset" it
+            navController.popBackStack(route, inclusive = false)
+        } else {
+            selectedItem = index
+            if (index == 3) viewModel.clearChat()
+            navController.navigate(route) {
+                popUpTo("home") { saveState = true }
+                launchSingleTop = true
+                restoreState = true
+            }
+        }
+    }
+
     Scaffold(
         bottomBar = {
             NavigationBar {
@@ -86,15 +102,7 @@ fun MainApp() {
                         icon = { Icon(icons[index], contentDescription = item) },
                         label = { Text(item) },
                         selected = selectedItem == index,
-                        onClick = {
-                            selectedItem = index
-                            viewModel.clearChat() // Clear chat when switching tabs as requested
-                            navController.navigate(item.lowercase()) {
-                                popUpTo("home") { saveState = true }
-                                launchSingleTop = true
-                                restoreState = true
-                            }
-                        }
+                        onClick = { navTo(item.lowercase(), index) }
                     )
                 }
             }
@@ -105,21 +113,24 @@ fun MainApp() {
             startDestination = "home",
             modifier = Modifier.padding(innerPadding)
         ) {
-            val navigateToChat = {
-                selectedItem = 3 // Index of "Chat"
-                viewModel.clearChat()
-                navController.navigate("chat") {
-                    popUpTo("home") { saveState = true }
-                    launchSingleTop = true
-                    restoreState = true
-                }
-            }
+            val navigateToChat = { navTo("chat", 3) }
 
-            composable("home") { MainScreen(viewModel) }
+            composable("home") { 
+                MainScreen(
+                    viewModel = viewModel, 
+                    onNavigateToHistory = { navTo("history", 1) },
+                    onNavigateToGlobalSpam = {
+                        navController.navigate("global_spam_list")
+                    }
+                ) 
+            }
             composable("history") { HistoryScreen(viewModel, onNavigateToChat = navigateToChat) }
             composable("lists") { ListManagementScreen(viewModel, onNavigateToChat = navigateToChat) }
             composable("chat") { ChatScreen(viewModel) }
             composable("settings") { SettingsScreen(viewModel) }
+            composable("global_spam_list") { 
+                GlobalSpamListScreen(viewModel, onNavigateBack = { navController.popBackStack() }) 
+            }
         }
     }
 }

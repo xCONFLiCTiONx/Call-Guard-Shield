@@ -32,6 +32,9 @@ import java.util.Locale
 @Composable
 fun ChatScreen(viewModel: MainViewModel) {
     val messages by viewModel.chatMessages.collectAsState()
+    val isIdentifying by viewModel.isIdentifying.collectAsState()
+    val bulkProgress by viewModel.bulkProgress.collectAsState()
+    
     val listState = rememberLazyListState()
     val coroutineScope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -104,7 +107,39 @@ fun ChatScreen(viewModel: MainViewModel) {
             }
         }
 
-        if (messages.isEmpty()) {
+        // Progress Bar Section
+        if (isIdentifying) {
+            Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
+                if (bulkProgress != null) {
+                    LinearProgressIndicator(
+                        progress = { bulkProgress!! },
+                        modifier = Modifier.fillMaxWidth(),
+                        color = MaterialTheme.colorScheme.primary,
+                        trackColor = MaterialTheme.colorScheme.surfaceVariant,
+                    )
+                    Text(
+                        text = "Bulk scan progress: ${(bulkProgress!! * 100).toInt()}%",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(top = 4.dp).align(Alignment.CenterHorizontally)
+                    )
+                } else {
+                    LinearProgressIndicator(
+                        modifier = Modifier.fillMaxWidth(),
+                        color = MaterialTheme.colorScheme.primary,
+                        trackColor = MaterialTheme.colorScheme.surfaceVariant
+                    )
+                    Text(
+                        text = "Contacting Gemini...",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(top = 4.dp).align(Alignment.CenterHorizontally)
+                    )
+                }
+            }
+        }
+
+        if (messages.isEmpty() && !isIdentifying) {
             Column(
                 modifier = Modifier.weight(1f).fillMaxWidth(),
                 horizontalAlignment = Alignment.CenterHorizontally,

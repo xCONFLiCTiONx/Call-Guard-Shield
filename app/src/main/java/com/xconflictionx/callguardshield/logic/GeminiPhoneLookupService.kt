@@ -18,7 +18,8 @@ import java.util.concurrent.TimeUnit
 class GeminiPhoneLookupService(
     private val context: Context,
     private val apiKey: String,
-    private val modelName: String
+    private val modelName: String,
+    private val dao: com.xconflictionx.callguardshield.data.dao.CallGuardShieldDao
 ) {
     private val TAG = "GEMINI_LOG"
 
@@ -69,21 +70,45 @@ class GeminiPhoneLookupService(
 
     suspend fun lookup(phoneNumberVariations: Set<String>): PhoneLookupResult? = withContext(Dispatchers.IO) {
         val number = phoneNumberVariations.first()
+        
+        // 1. Check Cache First
+        try {
+            val cached = dao.getLookupResult(number)
+            if (cached != null) {
+                val age = System.currentTimeMillis() - cached.lookupDate
+                val thirtyDays = 30L * 24 * 60 * 60 * 1000
+                if (age < thirtyDays) {
+                    Log.d(TAG, "Using cached result for $number")
+                    return@withContext cached.copy(isCached = true)
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Cache read failed: ${e.message}")
+        }
+
         val region = PhoneHelper.getRegionForNumber(number) ?: "USA"
         
         val prompt = """
             Task: Investigate reputation and identity for: $number ($region).
-            Instructions: 
-            1. Use Google Search to find current listings and spam reports.
-            2. Be helpful: Identify public services (City Hall, Police, etc) accurately.
-            3. Be cautious: Look for recent scam reports or spoofing warnings.
+            Targets: Check public directories, spam databases (800notes, who-called), and official brand sites.
             
             Output: Return a JSON object with these fields:
             ownerName, companyName, category, confidence (0.0 to 1.0), summary, spam (bool), scam (bool), evidence (list), sources (list).
             Note: Ensure 'summary' explains your verification logic.
         """.trimIndent()
 
-        executeSingleModelRequest(prompt, number)
+        val result = executeSingleModelRequest(prompt, number)
+        
+        // 2. Save to Cache on Success
+        if (result != null) {
+            try {
+                dao.insertLookupResult(result)
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to save cache: ${e.message}")
+            }
+        }
+        
+        return@withContext result
     }
 
     suspend fun lookupDeep(number: String): PhoneLookupResult? = withContext(Dispatchers.IO) {

@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -25,42 +26,92 @@ import com.xconflictionx.callguardshield.ui.component.NumberActionMenu
 import java.text.SimpleDateFormat
 import java.util.*
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HistoryScreen(viewModel: MainViewModel, onNavigateToChat: () -> Unit) {
     val logs by viewModel.callLogs.collectAsState()
     val context = LocalContext.current
     var selectedItem by remember { mutableStateOf<Pair<String, String?>?>(null) }
+    var showClearDialog by remember { mutableStateOf(false) }
 
-    Box {
-        LazyColumn(modifier = Modifier.fillMaxSize()) {
-            items(logs) { log ->
-                CallLogItem(
-                    log = log,
-                    onClick = { selectedItem = log.number to log.callerInfo }
-                )
-                HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = Color.Gray.copy(alpha = 0.2f))
-            }
-        }
-
-        selectedItem?.let { (number, label) ->
-            val logEntry = logs.find { it.number == number }
-            NumberActionMenu(
-                number = number,
-                label = label,
-                onDismiss = { selectedItem = null },
-                onIdentify = {
-                    viewModel.setAutoQuery(number, label)
-                    onNavigateToChat()
-                },
-                onAddToWhitelist = { viewModel.addToWhitelist(number, it) },
-                onAddToBlacklist = { viewModel.addToBlacklist(number, it) },
-                onRemoveFromList = { 
-                    logEntry?.let { viewModel.deleteCallLogEntry(it) }
-                },
-                removeLabel = "Delete from History",
-                onAddToContacts = { launchAddContactIntent(context, number) },
-                onCall = { launchCallIntent(context, number) }
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Call History") },
+                actions = {
+                    if (logs.isNotEmpty()) {
+                        IconButton(onClick = { showClearDialog = true }) {
+                            Icon(Icons.Default.DeleteSweep, contentDescription = "Clear All")
+                        }
+                    }
+                }
             )
+        }
+    ) { padding ->
+        Box(modifier = Modifier.padding(padding)) {
+            if (logs.isEmpty()) {
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text("No calls recorded yet.", color = Color.Gray)
+                }
+            }
+
+            LazyColumn(modifier = Modifier.fillMaxSize()) {
+                items(logs) { log ->
+                    CallLogItem(
+                        log = log,
+                        onClick = { 
+                            // Pass the best identity name to the popup menu
+                            selectedItem = log.number to (log.callerName ?: log.callerId ?: "Unknown") 
+                        }
+                    )
+                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = Color.Gray.copy(alpha = 0.2f))
+                }
+            }
+
+            if (showClearDialog) {
+                AlertDialog(
+                    onDismissRequest = { showClearDialog = false },
+                    title = { Text("Clear History") },
+                    text = { Text("Are you sure you want to delete all call logs? This cannot be undone.") },
+                    confirmButton = {
+                        Button(
+                            onClick = {
+                                viewModel.clearHistory()
+                                showClearDialog = false
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                        ) {
+                            Text("Clear All")
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showClearDialog = false }) {
+                            Text("Cancel")
+                        }
+                    }
+                )
+            }
+
+            selectedItem?.let { (number, label) ->
+                val logEntry = logs.find { it.number == number }
+                NumberActionMenu(
+                    number = number,
+                    label = label,
+                    onDismiss = { selectedItem = null },
+                    onIdentify = {
+                        viewModel.setAutoQuery(number, label)
+                        onNavigateToChat()
+                    },
+                    onAddToWhitelist = { viewModel.addToWhitelist(number, it) },
+                    onAddToBlacklist = { viewModel.addToBlacklist(number, it) },
+                    onRemoveFromList = { 
+                        logEntry?.let { viewModel.deleteCallLogEntry(it) }
+                    },
+                    removeLabel = "Delete from History",
+                    onAddToContacts = { launchAddContactIntent(context, number) },
+                    onCall = { launchCallIntent(context, number) }
+                )
+            }
         }
     }
 }
@@ -93,8 +144,37 @@ fun CallLogItem(
                     Text(
                         text = log.number,
                         style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.Bold
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface
                     )
+                    
+                    // Display system-provided Caller ID
+                    if (!log.callerId.isNullOrBlank()) {
+                        Text(
+                            text = "Carrier ID: ${log.callerId}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color.Gray
+                        )
+                    }
+
+                    // Display AI or Contact verified identity
+                    val verifiedName = log.callerName ?: if (log.isContact) "Verified Contact" else null
+                    if (!verifiedName.isNullOrBlank()) {
+                        Text(
+                            text = "Identity: $verifiedName",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (log.isContact) Color(0xFF4CAF50) else MaterialTheme.colorScheme.primary,
+                            fontWeight = FontWeight.Bold
+                        )
+                    } else {
+                        Text(
+                            text = "Identity: Unknown",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color.Gray,
+                            fontWeight = FontWeight.Normal
+                        )
+                    }
+
                     Text(
                         text = date,
                         style = MaterialTheme.typography.bodySmall,
@@ -145,17 +225,26 @@ fun CallLogItem(
             }
             
             log.callerInfo?.let { 
-                Spacer(modifier = Modifier.height(8.dp))
+                Spacer(modifier = Modifier.height(12.dp))
                 Surface(
-                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f),
-                    shape = MaterialTheme.shapes.medium
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.8f), // Darker surface for better contrast
+                    shape = MaterialTheme.shapes.small,
+                    border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
                 ) {
-                    Text(
-                        text = "Gemini: $it",
-                        modifier = Modifier.padding(8.dp),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.primary
-                    )
+                    Column(modifier = Modifier.padding(12.dp)) {
+                        Text(
+                            text = "Gemini Intelligence Report",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = it,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant // High-contrast text
+                        )
+                    }
                 }
             }
         }

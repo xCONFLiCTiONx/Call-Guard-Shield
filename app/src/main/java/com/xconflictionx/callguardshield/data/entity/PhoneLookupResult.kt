@@ -21,7 +21,8 @@ data class PhoneLookupResult(
     val evidence: List<String>? = emptyList(),
     val sources: List<String>? = emptyList(),
     val lastVerified: String? = null,
-    val lookupDate: Long = System.currentTimeMillis()
+    val lookupDate: Long = System.currentTimeMillis(),
+    val isCached: Boolean = false
 )
 
 class Converters {

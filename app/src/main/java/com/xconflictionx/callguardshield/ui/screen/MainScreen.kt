@@ -17,7 +17,7 @@ import java.text.SimpleDateFormat
 import java.util.*
 
 @Composable
-fun MainScreen(viewModel: MainViewModel) {
+fun MainScreen(viewModel: MainViewModel, onNavigateToHistory: () -> Unit, onNavigateToGlobalSpam: () -> Unit) {
     val settings by viewModel.settings.collectAsState()
     val callLogs by viewModel.callLogs.collectAsState()
     val isSyncing by viewModel.isSyncing.collectAsState()
@@ -69,7 +69,8 @@ fun MainScreen(viewModel: MainViewModel) {
         // Firewall Activity Card
         Card(
             modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+            onClick = onNavigateToHistory
         ) {
             Row(
                 modifier = Modifier.padding(16.dp),
@@ -87,7 +88,8 @@ fun MainScreen(viewModel: MainViewModel) {
         // Protection Strength Card
         Card(
             modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+            onClick = onNavigateToGlobalSpam
         ) {
             Row(
                 modifier = Modifier.padding(16.dp),

@@ -14,10 +14,12 @@ import com.xconflictionx.callguardshield.logic.CryptoManager
 import com.xconflictionx.callguardshield.logic.GeminiModelService
 import com.xconflictionx.callguardshield.logic.GeminiPhoneLookupService
 import com.xconflictionx.callguardshield.logic.PhoneHelper
+import com.xconflictionx.callguardshield.worker.BulkIdentifyWorker
 import com.xconflictionx.callguardshield.worker.SpamSyncWorker
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import java.util.Scanner
+import java.util.UUID
 
 data class AutoQuery(val number: String, val label: String?)
 
@@ -33,11 +35,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val blacklist = dao.getBlacklist().stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
     val whitelist = dao.getWhitelist().stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
     val globalSpamCount = dao.getGlobalSpamCount().stateIn(viewModelScope, SharingStarted.Lazily, 0)
+    val allGlobalSpam = dao.getAllGlobalSpamEntries().stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
     
     private val _isSyncing = MutableStateFlow(false)
     val isSyncing = _isSyncing.asStateFlow()
 
     private val _lastLookupResult = MutableStateFlow<PhoneLookupResult?>(null)
+
+    private val _investigationStatus = MutableStateFlow<String?>(null)
+    val investigationStatus = _investigationStatus.asStateFlow()
 
     private val _apiKeyStatus = MutableStateFlow("Unknown")
     val apiKeyStatus = _apiKeyStatus.asStateFlow()
@@ -54,14 +60,24 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _isIgnoringBatteryOptimizations = MutableStateFlow(false)
     val isIgnoringBatteryOptimizations = _isIgnoringBatteryOptimizations.asStateFlow()
 
+    private val _backgroundLocationGranted = MutableStateFlow(false)
+    val backgroundLocationGranted = _backgroundLocationGranted.asStateFlow()
+
     private val _consoleLogs = MutableStateFlow<List<ConsoleEntry>>(emptyList())
     val consoleLogs = _consoleLogs.asStateFlow()
+
+    private val _isIdentifying = MutableStateFlow(false)
+    val isIdentifying = _isIdentifying.asStateFlow()
+
+    private val _bulkProgress = MutableStateFlow<Float?>(null)
+    val bulkProgress = _bulkProgress.asStateFlow()
 
     private fun getLookupService(): GeminiPhoneLookupService {
         return GeminiPhoneLookupService(
             getApplication(),
             CryptoManager.getGeminiApiKey(getApplication()) ?: "",
-            settings.value.selectedGeminiModel
+            settings.value.selectedGeminiModel,
+            dao
         )
     }
 
@@ -69,13 +85,50 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         testGeminiKey()
         refreshGeminiModels()
         refreshBatteryStatus()
+        refreshLocationStatus()
         logToConsole("SYSTEM", "MainViewModel initialized", LogLevel.INFO)
+    }
+
+    fun refreshLocationStatus() {
+        try {
+            val context = getApplication<Application>()
+            val hasFineLocation = androidx.core.content.ContextCompat.checkSelfPermission(
+                context, 
+                android.Manifest.permission.ACCESS_FINE_LOCATION
+            ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+            
+            val hasBackgroundLocation = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                androidx.core.content.ContextCompat.checkSelfPermission(
+                    context, 
+                    android.Manifest.permission.ACCESS_BACKGROUND_LOCATION
+                ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+            } else {
+                true
+            }
+            
+            _backgroundLocationGranted.value = hasFineLocation && hasBackgroundLocation
+        } catch (e: Exception) {
+            logToConsole("SYSTEM", "Failed to refresh location status: ${e.message}", LogLevel.ERROR)
+        }
+    }
+
+    fun requestBackgroundLocation(context: android.content.Context) {
+        logToConsole("SYSTEM", "Guiding user to enable Background Location (All the time)", LogLevel.INFO)
+        try {
+            val intent = android.content.Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                data = android.net.Uri.fromParts("package", context.packageName, null)
+                addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(intent)
+        } catch (e: Exception) {
+            logToConsole("SYSTEM", "Failed to open settings: ${e.message}", LogLevel.ERROR)
+        }
     }
 
     fun logToConsole(tag: String, message: String, level: LogLevel) {
         if (level == LogLevel.ERROR) {
             val entry = ConsoleEntry(tag = tag, message = message, level = level)
-            _consoleLogs.value = (listOf(entry) + _consoleLogs.value).take(100) // Keep last 100 errors
+            _consoleLogs.value = (listOf(entry) + _consoleLogs.value).take(100)
         }
         
         when (level) {
@@ -261,6 +314,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun performInvestigation(number: String) {
         viewModelScope.launch {
+            _isIdentifying.value = true
+            _bulkProgress.value = null
             clearChat()
             addChatMessage(ChatEntry.UserMessage("Starting technical intel scan for: $number..."))
             
@@ -280,6 +335,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 if (result != null) {
                     _lastLookupResult.value = result
                     addChatMessage(ChatEntry.IntelReport(result))
+                    
+                    // Sync the new intelligence to History and Lists
+                    val bestName = result.companyName ?: result.ownerName ?: "Unknown"
+                    val formattedInfo = buildString {
+                        append("Risk: ${if (result.scam) "HIGH" else if (result.spam) "MEDIUM" else "LOW"} • ")
+                        append("Acc: ${(result.confidence?.times(100))?.toInt()}% • ")
+                        append(result.summary?.take(60))
+                    }
+                    dao.updateCallLogByNumber(number, bestName, formattedInfo)
+                    dao.updateBlacklistLabelByNumber(number, bestName)
+                    dao.updateWhitelistLabelByNumber(number, bestName)
+                    
                 } else {
                     val error = "Error: No reputable data found."
                     addChatMessage(ChatEntry.ErrorMessage(error))
@@ -288,12 +355,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val displayMsg = "Error: ${e.message ?: "Technical scan failed."}"
                 addChatMessage(ChatEntry.ErrorMessage(displayMsg))
                 logToConsole("INVESTIGATION", "Lookup failed for $number: $displayMsg", LogLevel.ERROR)
+            } finally {
+                _isIdentifying.value = false
+                _investigationStatus.value = null
             }
         }
     }
 
     fun refineInvestigation(number: String) {
         viewModelScope.launch {
+            _isIdentifying.value = true
             clearChat()
             val model = settings.value.selectedGeminiModel
             addChatMessage(ChatEntry.UserMessage("🔍 CRITICAL RE-VERIFICATION: $number"))
@@ -301,7 +372,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             try {
                 val result = getLookupService().lookupDeep(number)
                 if (result != null) {
+                    _lastLookupResult.value = result
                     addChatMessage(ChatEntry.IntelReport(result))
+                    
+                    // Sync the new deep intelligence to History and Lists
+                    val bestName = result.companyName ?: result.ownerName ?: "Unknown"
+                    val formattedInfo = buildString {
+                        append("Risk: ${if (result.scam) "HIGH" else if (result.spam) "MEDIUM" else "LOW"} • ")
+                        append("Acc: ${(result.confidence?.times(100))?.toInt()}% • ")
+                        append(result.summary?.take(60))
+                    }
+                    dao.updateCallLogByNumber(number, bestName, formattedInfo)
+                    dao.updateBlacklistLabelByNumber(number, bestName)
+                    dao.updateWhitelistLabelByNumber(number, bestName)
+                    
                 } else {
                     addChatMessage(ChatEntry.ErrorMessage("Error: Even deep search returned no definitive results."))
                 }
@@ -309,6 +393,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val displayMsg = "Error: ${e.message ?: "Deep scan failed."}"
                 addChatMessage(ChatEntry.ErrorMessage(displayMsg))
                 logToConsole("INVESTIGATION", "Deep lookup failed for $number: $displayMsg", LogLevel.ERROR)
+            } finally {
+                _isIdentifying.value = false
+                _investigationStatus.value = null
             }
         }
     }
@@ -370,6 +457,62 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             } catch (e: Exception) {
                 logToConsole("LIST", "Failed to add to Whitelist: ${e.message}", LogLevel.ERROR)
             }
+        }
+    }
+
+    fun bulkIdentify(isBlacklist: Boolean) {
+        viewModelScope.launch {
+            _isIdentifying.value = true
+            
+            // Ensure we have the latest list from the database
+            val listToIdentify = if (isBlacklist) {
+                dao.getBlacklist().first()
+            } else {
+                dao.getWhitelist().first()
+            }
+
+            if (listToIdentify.isEmpty()) {
+                addChatMessage(ChatEntry.UserMessage("The list is empty. Nothing to identify."))
+                _isIdentifying.value = false
+                return@launch
+            }
+
+            addChatMessage(ChatEntry.UserMessage("🔍 Bulk Identification started for ${listToIdentify.size} numbers..."))
+            logToConsole("BULK", "Starting identification for ${listToIdentify.size} entries", LogLevel.INFO)
+
+            listToIdentify.forEachIndexed { index, entry ->
+                val number = if (entry is BlacklistEntry) entry.pattern else (entry as WhitelistEntry).number
+                _bulkProgress.value = (index + 1).toFloat() / listToIdentify.size
+                addChatMessage(ChatEntry.UserMessage("Processing [${index + 1}/${listToIdentify.size}]: $number"))
+                
+                try {
+                    val result = getLookupService().lookup(setOf(number))
+                    if (result != null) {
+                        val bestName = result.companyName ?: result.ownerName ?: "Unknown"
+                        val formattedInfo = buildString {
+                            append("Risk: ${if (result.scam) "HIGH" else if (result.spam) "MEDIUM" else "LOW"} • ")
+                            append("Acc: ${(result.confidence?.times(100))?.toInt()}% • ")
+                            append(result.summary?.take(60))
+                        }
+                        
+                        if (isBlacklist) dao.updateBlacklistLabelByNumber(number, bestName)
+                        else dao.updateWhitelistLabelByNumber(number, bestName)
+                        
+                        dao.updateCallLogByNumber(number, bestName, formattedInfo)
+                        logToConsole("BULK", "Success: $number -> $bestName", LogLevel.INFO)
+                    }
+                } catch (e: Exception) {
+                    logToConsole("BULK", "Failed on $number: ${e.message}", LogLevel.ERROR)
+                }
+                
+                if (index < listToIdentify.size - 1) {
+                    kotlinx.coroutines.delay(4000)
+                }
+            }
+            
+            addChatMessage(ChatEntry.UserMessage("✅ Bulk Identification Complete."))
+            _bulkProgress.value = null
+            _isIdentifying.value = false
         }
     }
 

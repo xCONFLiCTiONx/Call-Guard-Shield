@@ -99,8 +99,11 @@ interface CallGuardShieldDao {
     @Query("SELECT * FROM global_spam WHERE :incomingNumber LIKE pattern || '%' LIMIT 1")
     suspend fun findGlobalSpamByPattern(incomingNumber: String): GlobalSpamEntry?
 
-    @Query("SELECT COUNT(*) FROM global_spam WHERE dictionaryId = :id")
-    fun getGlobalSpamCountByDictionary(id: String): Flow<Int>
+    @Query("SELECT * FROM global_spam WHERE dictionaryId = :id")
+    fun getGlobalSpamByDictionaryFlow(id: String): Flow<List<GlobalSpamEntry>>
+
+    @Query("SELECT * FROM global_spam ORDER BY pattern ASC")
+    fun getAllGlobalSpamEntries(): Flow<List<GlobalSpamEntry>>
 
     @Query("SELECT * FROM blacklist WHERE :incomingNumber LIKE pattern || '%' LIMIT 1")
     suspend fun findBlacklistMatch(incomingNumber: String): BlacklistEntry?
@@ -110,7 +113,7 @@ interface CallGuardShieldDao {
 
     // Call Log (All calls)
     @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun insertCallLogEntry(entry: CallLogEntry)
+    suspend fun insertCallLogEntry(entry: CallLogEntry): Long
 
     @Query("SELECT * FROM call_log ORDER BY timestamp DESC")
     fun getAllCallLogs(): Flow<List<CallLogEntry>>
@@ -129,6 +132,18 @@ interface CallGuardShieldDao {
 
     @Query("UPDATE call_log SET callerInfo = :info WHERE id = :id")
     suspend fun updateCallLogInfo(id: Long, info: String)
+
+    @Query("UPDATE call_log SET callerName = :name, callerInfo = :info WHERE id = :id")
+    suspend fun updateCallLogDetailed(id: Long, name: String, info: String)
+
+    @Query("UPDATE call_log SET callerName = :name, callerInfo = :info WHERE number = :number")
+    suspend fun updateCallLogByNumber(number: String, name: String, info: String)
+
+    @Query("UPDATE blacklist SET label = :label WHERE pattern = :number")
+    suspend fun updateBlacklistLabelByNumber(number: String, label: String)
+
+    @Query("UPDATE whitelist SET label = :label WHERE number = :number")
+    suspend fun updateWhitelistLabelByNumber(number: String, label: String)
 
     // Phone Lookup Cache
     @Insert(onConflict = OnConflictStrategy.REPLACE)

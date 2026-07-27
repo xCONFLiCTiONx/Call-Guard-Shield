@@ -49,7 +49,24 @@ fun PhoneLookupResultCard(result: PhoneLookupResult, onRefine: (String) -> Unit 
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Column {
-                    Text("Intelligence Report", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("Intelligence Report", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+                        if (result.isCached) {
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Surface(
+                                color = Color.Gray.copy(alpha = 0.2f),
+                                shape = MaterialTheme.shapes.extraSmall
+                            ) {
+                                Text(
+                                    "CACHED",
+                                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = Color.Gray,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                    }
                     Text(result.phoneNumber, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                 }
                 

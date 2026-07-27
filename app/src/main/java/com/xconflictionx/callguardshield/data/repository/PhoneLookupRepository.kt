@@ -13,35 +13,20 @@ class PhoneLookupRepository(
     private val settingsRepo = SettingsRepository(context)
 
     suspend fun lookup(phoneNumber: String, forceRefresh: Boolean = false): PhoneLookupResult? {
-        val normalized = phoneNumber.filter { it.isDigit() }
-        
-        // 1. Check Cache
-        if (!forceRefresh) {
-            val cached = dao.getLookupResult(normalized)
-            val settings = settingsRepo.settingsFlow.first()
-            if (cached != null && isCacheValid(cached, settings.cacheAgeDays)) {
-                return cached
-            }
-        }
-
-        // 2. Perform fresh lookup via Gemini
         val apiKey = CryptoManager.getGeminiApiKey(context) ?: return null
         val settings = settingsRepo.settingsFlow.first()
-        val provider = GeminiPhoneLookupService(context, apiKey, settings.selectedGeminiModel)
-        val variations = NumberNormalizer.getVariations(phoneNumber)
-
-        val result = provider.lookup(variations)
         
-        if (result != null) {
-            dao.insertLookupResult(result.copy(phoneNumber = normalized))
+        // Use the Service which now handles internal caching and rotation
+        val service = GeminiPhoneLookupService(context, apiKey, settings.selectedGeminiModel, dao)
+        
+        // We use PhoneHelper for consistency across the app
+        val variations = setOf(phoneNumber, PhoneHelper.normalizeToE164(phoneNumber))
+        
+        return if (forceRefresh) {
+            service.lookupDeep(phoneNumber)
+        } else {
+            service.lookup(variations)
         }
-        
-        return result
-    }
-
-    private fun isCacheValid(result: PhoneLookupResult, ageDays: Int): Boolean {
-        val expiryMillis = ageDays.toLong() * 24 * 60 * 60 * 1000
-        return (System.currentTimeMillis() - result.lookupDate) < expiryMillis
     }
 
     suspend fun clearCache() {

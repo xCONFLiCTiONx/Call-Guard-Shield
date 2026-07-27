@@ -12,6 +12,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.FileUpload
 import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material3.*
@@ -26,6 +27,8 @@ import com.xconflictionx.callguardshield.ui.component.NumberActionMenu
 
 @Composable
 fun ListManagementScreen(viewModel: MainViewModel, onNavigateToChat: () -> Unit) {
+    val isIdentifying by viewModel.isIdentifying.collectAsState()
+    val bulkProgress by viewModel.bulkProgress.collectAsState()
     var tabIndex by remember { mutableIntStateOf(0) }
     val tabs = listOf("Blacklist", "Whitelist")
     val context = LocalContext.current
@@ -64,6 +67,15 @@ fun ListManagementScreen(viewModel: MainViewModel, onNavigateToChat: () -> Unit)
                     text = { Text(title) }
                 )
             }
+        }
+
+        if (isIdentifying) {
+            LinearProgressIndicator(
+                progress = { bulkProgress ?: 0f },
+                modifier = Modifier.fillMaxWidth().height(2.dp),
+                color = MaterialTheme.colorScheme.primary,
+                trackColor = Color.Transparent
+            )
         }
         
         // Action Bar
@@ -104,6 +116,13 @@ fun ListManagementScreen(viewModel: MainViewModel, onNavigateToChat: () -> Unit)
                     }
                 }) {
                     Icon(Icons.Default.FileDownload, contentDescription = "Export")
+                }
+
+                IconButton(onClick = {
+                    viewModel.bulkIdentify(tabIndex == 0)
+                    onNavigateToChat()
+                }) {
+                    Icon(Icons.Default.AutoAwesome, contentDescription = "Bulk Identify")
                 }
             }
         }
@@ -332,8 +351,8 @@ fun WhitelistTab(viewModel: MainViewModel, onNavigateToChat: () -> Unit) {
                         onAddToWhitelist = { l -> viewModel.addToWhitelist(number, l) },
                         onAddToBlacklist = { l -> viewModel.addToBlacklist(number, l) },
                         onRemoveFromList = { 
-                            whitelist.find { it.number == number }?.let { viewModel.removeFromWhitelist(it) }
-                        },
+                        whitelist.find { it.number == number }?.let { viewModel.removeFromWhitelist(it) }
+                    },
                         onEditLabel = { selectedItem = Triple(number, label, true) },
                         onAddToContacts = { launchAddContactIntent(context, number) },
                         onCall = { launchCallIntent(context, number) }

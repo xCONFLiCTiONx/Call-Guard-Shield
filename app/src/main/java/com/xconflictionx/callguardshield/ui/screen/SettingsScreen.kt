@@ -17,12 +17,14 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.lazy.items
 import com.xconflictionx.callguardshield.ui.ConsoleEntry
 import com.xconflictionx.callguardshield.ui.LogLevel
@@ -38,12 +40,27 @@ fun SettingsScreen(viewModel: MainViewModel) {
     val availableModels by viewModel.availableModels.collectAsState()
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
+    
+    var showLocationRationale by remember { mutableStateOf(false) }
 
-    // Refresh battery status when returning to settings
+    val backgroundLocationLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        viewModel.refreshLocationStatus()
+        if (!granted && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+            // On Android 11+, the system might not show a dialog if they already said no once.
+            // We guide them to settings as a secondary fallback.
+            Toast.makeText(context, "Please enable 'Allow all the time' in settings.", Toast.LENGTH_LONG).show()
+            viewModel.requestBackgroundLocation(context)
+        }
+    }
+
+    // Refresh battery and location status when returning to settings
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
                 viewModel.refreshBatteryStatus()
+                viewModel.refreshLocationStatus()
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -223,6 +240,7 @@ fun SettingsScreen(viewModel: MainViewModel) {
 
         item {
             val isIgnoringBattery by viewModel.isIgnoringBatteryOptimizations.collectAsState()
+            val isBackgroundLocationGranted by viewModel.backgroundLocationGranted.collectAsState()
             
             Card(
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
@@ -230,12 +248,13 @@ fun SettingsScreen(viewModel: MainViewModel) {
                 Column(modifier = Modifier.padding(16.dp)) {
                     Text("System Optimization", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                     Text(
-                        "Ensure the app remains active in the background for real-time protection.",
+                        "Ensure the app remains active and has necessary data for real-time protection.",
                         style = MaterialTheme.typography.bodySmall
                     )
                     
                     Spacer(modifier = Modifier.height(12.dp))
                     
+                    // Battery Section
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -243,12 +262,12 @@ fun SettingsScreen(viewModel: MainViewModel) {
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                if (isIgnoringBattery) "Unrestricted" else "Optimized (Restricted)",
+                                "Battery: " + if (isIgnoringBattery) "Unrestricted" else "Optimized (Restricted)",
                                 style = MaterialTheme.typography.bodyLarge,
                                 color = if (isIgnoringBattery) Color.Green else Color.Yellow
                             )
                             Text(
-                                if (isIgnoringBattery) "App is running at full priority." else "System may pause the app to save power.",
+                                "Prevents system from killing the firewall service.",
                                 style = MaterialTheme.typography.bodySmall
                             )
                         }
@@ -257,9 +276,38 @@ fun SettingsScreen(viewModel: MainViewModel) {
                             Button(onClick = { viewModel.requestIgnoreBatteryOptimizations(context) }) {
                                 Text("Manage")
                             }
-                        } else {
-                            IconButton(onClick = { viewModel.refreshBatteryStatus() }) {
-                                Icon(Icons.Default.Refresh, contentDescription = "Refresh Status")
+                        }
+                    }
+
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp), color = Color.Gray.copy(alpha = 0.1f))
+
+                    // Location Section
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                "Location: " + if (isBackgroundLocationGranted) "All the time" else "While in use (Restricted)",
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = if (isBackgroundLocationGranted) Color.Green else Color.Yellow
+                            )
+                            Text(
+                                "Required for region-based area code blocking.",
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                        }
+                        
+                        if (!isBackgroundLocationGranted) {
+                            Button(onClick = { 
+                                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                                    showLocationRationale = true 
+                                } else {
+                                    viewModel.requestBackgroundLocation(context)
+                                }
+                            }) {
+                                Text("Manage")
                             }
                         }
                     }
@@ -268,6 +316,28 @@ fun SettingsScreen(viewModel: MainViewModel) {
         }
 
         item {
+            if (showLocationRationale) {
+                AlertDialog(
+                    onDismissRequest = { showLocationRationale = false },
+                    title = { Text("Location Background Access") },
+                    text = { 
+                        Text("To block spam based on your region while the app is closed, please select 'Allow all the time' on the next screen.")
+                    },
+                    confirmButton = {
+                        Button(onClick = {
+                            showLocationRationale = false
+                            backgroundLocationLauncher.launch(android.Manifest.permission.ACCESS_BACKGROUND_LOCATION)
+                        }) {
+                            Text("Continue")
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showLocationRationale = false }) {
+                            Text("Cancel")
+                        }
+                    }
+                )
+            }
             Card(
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
             ) {

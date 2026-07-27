@@ -11,5 +11,7 @@ data class CallLogEntry(
     val isBlocked: Boolean,
     val reason: String? = null,
     val isContact: Boolean,
-    val callerInfo: String? = null
+    val callerId: String? = null, // System provided name
+    val callerName: String? = null, // Gemini or Contact verified name
+    val callerInfo: String? = null // Gemini reputation report
 )
