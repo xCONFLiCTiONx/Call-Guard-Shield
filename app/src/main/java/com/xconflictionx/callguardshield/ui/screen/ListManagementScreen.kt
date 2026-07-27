@@ -29,6 +29,7 @@ import com.xconflictionx.callguardshield.ui.component.NumberActionMenu
 fun ListManagementScreen(viewModel: MainViewModel, onNavigateToChat: () -> Unit) {
     val isIdentifying by viewModel.isIdentifying.collectAsState()
     val bulkProgress by viewModel.bulkProgress.collectAsState()
+    val bulkNumber by viewModel.bulkNumber.collectAsState()
     var tabIndex by remember { mutableIntStateOf(0) }
     val tabs = listOf("Blacklist", "Whitelist")
     val context = LocalContext.current
@@ -70,12 +71,22 @@ fun ListManagementScreen(viewModel: MainViewModel, onNavigateToChat: () -> Unit)
         }
 
         if (isIdentifying) {
-            LinearProgressIndicator(
-                progress = { bulkProgress ?: 0f },
-                modifier = Modifier.fillMaxWidth().height(2.dp),
-                color = MaterialTheme.colorScheme.primary,
-                trackColor = Color.Transparent
-            )
+            Column(modifier = Modifier.fillMaxWidth()) {
+                LinearProgressIndicator(
+                    progress = { bulkProgress ?: 0f },
+                    modifier = Modifier.fillMaxWidth().height(4.dp),
+                    color = MaterialTheme.colorScheme.primary,
+                    trackColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.2f)
+                )
+                bulkNumber?.let {
+                    Text(
+                        text = "Identifying: $it",
+                        style = MaterialTheme.typography.labelSmall,
+                        modifier = Modifier.padding(start = 8.dp, top = 2.dp),
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+            }
         }
         
         // Action Bar
@@ -120,9 +131,12 @@ fun ListManagementScreen(viewModel: MainViewModel, onNavigateToChat: () -> Unit)
 
                 IconButton(onClick = {
                     viewModel.bulkIdentify(tabIndex == 0)
-                    onNavigateToChat()
                 }) {
-                    Icon(Icons.Default.AutoAwesome, contentDescription = "Bulk Identify")
+                    Icon(
+                        Icons.Default.AutoAwesome, 
+                        contentDescription = "Bulk Identify",
+                        tint = if (isIdentifying) MaterialTheme.colorScheme.primary else LocalContentColor.current
+                    )
                 }
             }
         }

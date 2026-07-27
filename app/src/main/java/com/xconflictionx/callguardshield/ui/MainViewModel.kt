@@ -72,6 +72,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _bulkProgress = MutableStateFlow<Float?>(null)
     val bulkProgress = _bulkProgress.asStateFlow()
 
+    private val _bulkNumber = MutableStateFlow<String?>(null)
+    val bulkNumber = _bulkNumber.asStateFlow()
+
     private fun getLookupService(): GeminiPhoneLookupService {
         return GeminiPhoneLookupService(
             getApplication(),
@@ -462,57 +465,50 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun bulkIdentify(isBlacklist: Boolean) {
         viewModelScope.launch {
-            _isIdentifying.value = true
-            
-            // Ensure we have the latest list from the database
-            val listToIdentify = if (isBlacklist) {
-                dao.getBlacklist().first()
-            } else {
-                dao.getWhitelist().first()
-            }
-
-            if (listToIdentify.isEmpty()) {
-                addChatMessage(ChatEntry.UserMessage("The list is empty. Nothing to identify."))
-                _isIdentifying.value = false
-                return@launch
-            }
-
-            addChatMessage(ChatEntry.UserMessage("🔍 Bulk Identification started for ${listToIdentify.size} numbers..."))
-            logToConsole("BULK", "Starting identification for ${listToIdentify.size} entries", LogLevel.INFO)
-
-            listToIdentify.forEachIndexed { index, entry ->
-                val number = if (entry is BlacklistEntry) entry.pattern else (entry as WhitelistEntry).number
-                _bulkProgress.value = (index + 1).toFloat() / listToIdentify.size
-                addChatMessage(ChatEntry.UserMessage("Processing [${index + 1}/${listToIdentify.size}]: $number"))
+            try {
+                logToConsole("BULK", "Queueing background bulk identification", LogLevel.INFO)
                 
-                try {
-                    val result = getLookupService().lookup(setOf(number))
-                    if (result != null) {
-                        val bestName = result.companyName ?: result.ownerName ?: "Unknown"
-                        val formattedInfo = buildString {
-                            append("Risk: ${if (result.scam) "HIGH" else if (result.spam) "MEDIUM" else "LOW"} • ")
-                            append("Acc: ${(result.confidence?.times(100))?.toInt()}% • ")
-                            append(result.summary?.take(60))
+                val data = workDataOf("isBlacklist" to isBlacklist)
+                val request = OneTimeWorkRequestBuilder<BulkIdentifyWorker>()
+                    .setInputData(data)
+                    .addTag("BULK_IDENTIFY")
+                    .build()
+                
+                WorkManager.getInstance(getApplication()).enqueueUniqueWork(
+                    "bulk_identify",
+                    ExistingWorkPolicy.KEEP,
+                    request
+                )
+                
+                // Observe progress
+                WorkManager.getInstance(getApplication())
+                    .getWorkInfoByIdFlow(request.id)
+                    .onEach { workInfo ->
+                        if (workInfo != null) {
+                            when (workInfo.state) {
+                                WorkInfo.State.RUNNING -> {
+                                    _isIdentifying.value = true
+                                    _bulkProgress.value = workInfo.progress.getFloat("progress", 0f)
+                                    _bulkNumber.value = workInfo.progress.getString("number")
+                                }
+                                WorkInfo.State.SUCCEEDED -> {
+                                    _isIdentifying.value = false
+                                    _bulkProgress.value = null
+                                    _bulkNumber.value = null
+                                }
+                                WorkInfo.State.FAILED, WorkInfo.State.CANCELLED -> {
+                                    _isIdentifying.value = false
+                                    _bulkProgress.value = null
+                                    _bulkNumber.value = null
+                                }
+                                else -> {}
+                            }
                         }
-                        
-                        if (isBlacklist) dao.updateBlacklistLabelByNumber(number, bestName)
-                        else dao.updateWhitelistLabelByNumber(number, bestName)
-                        
-                        dao.updateCallLogByNumber(number, bestName, formattedInfo)
-                        logToConsole("BULK", "Success: $number -> $bestName", LogLevel.INFO)
-                    }
-                } catch (e: Exception) {
-                    logToConsole("BULK", "Failed on $number: ${e.message}", LogLevel.ERROR)
-                }
-                
-                if (index < listToIdentify.size - 1) {
-                    kotlinx.coroutines.delay(4000)
-                }
+                    }.launchIn(viewModelScope)
+
+            } catch (e: Exception) {
+                logToConsole("BULK", "Failed to enqueue bulk identification: ${e.message}", LogLevel.ERROR)
             }
-            
-            addChatMessage(ChatEntry.UserMessage("✅ Bulk Identification Complete."))
-            _bulkProgress.value = null
-            _isIdentifying.value = false
         }
     }
 
