@@ -20,6 +20,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
+import android.widget.Toast
+import androidx.compose.foundation.lazy.items
+import com.xconflictionx.callguardshield.ui.ConsoleEntry
+import com.xconflictionx.callguardshield.ui.LogLevel
 import com.xconflictionx.callguardshield.ui.MainViewModel
 import com.xconflictionx.callguardshield.logic.CryptoManager
 import java.text.SimpleDateFormat
@@ -323,6 +329,74 @@ fun SettingsScreen(viewModel: MainViewModel) {
                         checked = settings?.blockUnknown ?: false,
                         onCheckedChange = { viewModel.updateSetting(blockUnknown = it) }
                     )
+                }
+            }
+        }
+
+        item {
+            Text(
+                "Technical Console",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold
+            )
+        }
+
+        item {
+            val consoleLogs by viewModel.consoleLogs.collectAsState()
+            val clipboard = LocalClipboardManager.current
+            
+            Card(
+                colors = CardDefaults.cardColors(containerColor = Color.Black),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("Backend Activity", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+                        Row {
+                            TextButton(onClick = { 
+                                val text = consoleLogs.joinToString("\n") { "[${it.formattedTime}] ${it.tag}: ${it.message}" }
+                                if (text.isNotBlank()) {
+                                    clipboard.setText(AnnotatedString(text))
+                                    Toast.makeText(context, "Logs copied", Toast.LENGTH_SHORT).show()
+                                }
+                            }) {
+                                Text("Copy All", style = MaterialTheme.typography.labelSmall)
+                            }
+                            TextButton(onClick = { viewModel.clearConsole() }) {
+                                Text("Clear", style = MaterialTheme.typography.labelSmall, color = Color.Red)
+                            }
+                        }
+                    }
+                    
+                    Box(modifier = Modifier.height(200.dp).fillMaxWidth()) {
+                        if (consoleLogs.isEmpty()) {
+                            Text(
+                                "No activity recorded.",
+                                modifier = Modifier.align(Alignment.Center),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = Color.DarkGray
+                            )
+                        } else {
+                            LazyColumn(modifier = Modifier.fillMaxSize()) {
+                                items(consoleLogs) { entry ->
+                                    Text(
+                                        text = "[${entry.formattedTime}] ${entry.tag}: ${entry.message}",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = when (entry.level) {
+                                            LogLevel.ERROR -> Color(0xFFFF5252)
+                                            LogLevel.WARN -> Color(0xFFFFD740)
+                                            else -> Color(0xFFB0BEC5)
+                                        },
+                                        modifier = Modifier.padding(vertical = 1.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }

@@ -54,6 +54,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _isIgnoringBatteryOptimizations = MutableStateFlow(false)
     val isIgnoringBatteryOptimizations = _isIgnoringBatteryOptimizations.asStateFlow()
 
+    private val _consoleLogs = MutableStateFlow<List<ConsoleEntry>>(emptyList())
+    val consoleLogs = _consoleLogs.asStateFlow()
+
     private fun getLookupService(): GeminiPhoneLookupService {
         return GeminiPhoneLookupService(
             getApplication(),
@@ -66,6 +69,24 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         testGeminiKey()
         refreshGeminiModels()
         refreshBatteryStatus()
+        logToConsole("SYSTEM", "MainViewModel initialized", LogLevel.INFO)
+    }
+
+    fun logToConsole(tag: String, message: String, level: LogLevel) {
+        if (level == LogLevel.ERROR) {
+            val entry = ConsoleEntry(tag = tag, message = message, level = level)
+            _consoleLogs.value = (listOf(entry) + _consoleLogs.value).take(100) // Keep last 100 errors
+        }
+        
+        when (level) {
+            LogLevel.INFO -> Log.i(tag, message)
+            LogLevel.WARN -> Log.w(tag, message)
+            LogLevel.ERROR -> Log.e(tag, message)
+        }
+    }
+
+    fun clearConsole() {
+        _consoleLogs.value = emptyList()
     }
 
     fun refreshBatteryStatus() {
@@ -73,15 +94,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val pm = getApplication<Application>().getSystemService(android.content.Context.POWER_SERVICE) as android.os.PowerManager
             _isIgnoringBatteryOptimizations.value = pm.isIgnoringBatteryOptimizations(getApplication<Application>().packageName)
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to refresh battery status", e)
+            logToConsole("BATTERY", "Failed to check status: ${e.message}", LogLevel.ERROR)
         }
     }
 
     fun requestIgnoreBatteryOptimizations(context: android.content.Context) {
-        val intent = android.content.Intent(android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
-            data = android.net.Uri.parse("package:${context.packageName}")
+        try {
+            val intent = android.content.Intent(android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                data = android.net.Uri.parse("package:${context.packageName}")
+            }
+            context.startActivity(intent)
+        } catch (e: Exception) {
+            logToConsole("BATTERY", "Failed to request permission: ${e.message}", LogLevel.ERROR)
         }
-        context.startActivity(intent)
     }
 
     fun addChatMessage(entry: ChatEntry) {
@@ -95,7 +120,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun togglePause() {
         viewModelScope.launch {
-            settingsRepo.updateIsPaused(!settings.value.isPaused)
+            try {
+                settingsRepo.updateIsPaused(!settings.value.isPaused)
+            } catch (e: Exception) {
+                logToConsole("SETTINGS", "Failed to toggle pause: ${e.message}", LogLevel.ERROR)
+            }
         }
     }
 
@@ -107,22 +136,30 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         blockUnknown: Boolean? = null
     ) {
         viewModelScope.launch {
-            blockNonArkansas?.let { settingsRepo.updateBlockNonArkansas(it) }
-            blockInternational?.let { settingsRepo.updateBlockInternational(it) }
-            showContactsInHistory?.let { settingsRepo.updateShowContactsInHistory(it) }
-            blockNonContacts?.let { settingsRepo.updateBlockNonContacts(it) }
-            blockUnknown?.let { settingsRepo.updateBlockUnknown(it) }
+            try {
+                blockNonArkansas?.let { settingsRepo.updateBlockNonArkansas(it) }
+                blockInternational?.let { settingsRepo.updateBlockInternational(it) }
+                showContactsInHistory?.let { settingsRepo.updateShowContactsInHistory(it) }
+                blockNonContacts?.let { settingsRepo.updateBlockNonContacts(it) }
+                blockUnknown?.let { settingsRepo.updateBlockUnknown(it) }
+            } catch (e: Exception) {
+                logToConsole("SETTINGS", "Failed to update settings: ${e.message}", LogLevel.ERROR)
+            }
         }
     }
 
     fun updateDictionaryEnabled(id: String, enabled: Boolean) {
         viewModelScope.launch {
-            val current = settings.value.enabledDictionaries.toMutableSet()
-            if (enabled) current.add(id) else current.remove(id)
-            settingsRepo.updateEnabledDictionaries(current)
-            if (enabled) forceSync()
-            else {
-                dao.deleteGlobalSpamByDictionary(id)
+            try {
+                val current = settings.value.enabledDictionaries.toMutableSet()
+                if (enabled) current.add(id) else current.remove(id)
+                settingsRepo.updateEnabledDictionaries(current)
+                if (enabled) forceSync()
+                else {
+                    dao.deleteGlobalSpamByDictionary(id)
+                }
+            } catch (e: Exception) {
+                logToConsole("DICTIONARY", "Failed to update $id: ${e.message}", LogLevel.ERROR)
             }
         }
     }
@@ -130,33 +167,53 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun forceSync() {
         viewModelScope.launch {
             _isSyncing.value = true
-            val data = Data.Builder().putBoolean("force", true).build()
-            val request = OneTimeWorkRequestBuilder<SpamSyncWorker>()
-                .setInputData(data)
-                .build()
-            
-            WorkManager.getInstance(getApplication()).enqueue(request)
-            kotlinx.coroutines.delay(1500)
-            _isSyncing.value = false
+            try {
+                logToConsole("SYNC", "Manual sync requested", LogLevel.INFO)
+                val data = Data.Builder().putBoolean("force", true).build()
+                val request = OneTimeWorkRequestBuilder<SpamSyncWorker>()
+                    .setInputData(data)
+                    .build()
+                
+                WorkManager.getInstance(getApplication()).enqueue(request)
+                kotlinx.coroutines.delay(1500)
+            } catch (e: Exception) {
+                logToConsole("SYNC", "Failed to enqueue sync: ${e.message}", LogLevel.ERROR)
+            } finally {
+                _isSyncing.value = false
+            }
         }
     }
 
     fun saveGeminiKey(key: String) {
-        CryptoManager.saveGeminiApiKey(getApplication(), key)
-        testGeminiKey()
-        refreshGeminiModels()
+        try {
+            CryptoManager.saveGeminiApiKey(getApplication(), key)
+            testGeminiKey()
+            refreshGeminiModels()
+            logToConsole("CRYPTO", "API Key saved and validated", LogLevel.INFO)
+        } catch (e: Exception) {
+            logToConsole("CRYPTO", "Failed to save key: ${e.message}", LogLevel.ERROR)
+        }
     }
 
     fun clearGeminiKey() {
-        CryptoManager.clearGeminiApiKey(getApplication())
-        _apiKeyStatus.value = "Not Configured"
-        _availableModels.value = emptyList()
+        try {
+            CryptoManager.clearGeminiApiKey(getApplication())
+            _apiKeyStatus.value = "Not Configured"
+            _availableModels.value = emptyList()
+            logToConsole("CRYPTO", "API Key cleared", LogLevel.INFO)
+        } catch (e: Exception) {
+            logToConsole("CRYPTO", "Failed to clear key: ${e.message}", LogLevel.ERROR)
+        }
     }
 
     fun testGeminiKey() {
         viewModelScope.launch {
-            val key = CryptoManager.getGeminiApiKey(getApplication())
-            _apiKeyStatus.value = if (key.isNullOrBlank()) "Not Configured" else "Connected"
+            try {
+                val key = CryptoManager.getGeminiApiKey(getApplication())
+                _apiKeyStatus.value = if (key.isNullOrBlank()) "Not Configured" else "Connected"
+            } catch (e: Exception) {
+                logToConsole("CRYPTO", "Key test failed: ${e.message}", LogLevel.ERROR)
+            }
         }
     }
 
@@ -174,8 +231,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     _availableModels.value = response.models
                         .filter { it.supportedGenerationMethods.contains("generateContent") }
                         .map { it.name.substringAfter("models/") }
+                    logToConsole("GEMINI", "Discovered ${_availableModels.value.size} models", LogLevel.INFO)
                 } catch (e: Exception) {
-                    Log.e(TAG, "Failed to fetch models", e)
+                    logToConsole("GEMINI", "Failed to fetch models: ${e.message}", LogLevel.ERROR)
                 }
             }
         }
@@ -183,7 +241,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun updateSelectedModel(model: String) {
         viewModelScope.launch {
-            settingsRepo.updateSelectedGeminiModel(model)
+            try {
+                settingsRepo.updateSelectedGeminiModel(model)
+                logToConsole("SETTINGS", "Selected model changed to $model", LogLevel.INFO)
+            } catch (e: Exception) {
+                logToConsole("SETTINGS", "Failed to update model: ${e.message}", LogLevel.ERROR)
+            }
         }
     }
 
@@ -199,12 +262,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun performInvestigation(number: String) {
         viewModelScope.launch {
             clearChat()
-            addChatMessage(ChatEntry.UserMessage("🔍 Starting technical scan for: $number..."))
+            addChatMessage(ChatEntry.UserMessage("Starting technical intel scan for: $number..."))
             
             try {
                 val apiKey = CryptoManager.getGeminiApiKey(getApplication())
                 if (apiKey.isNullOrBlank()) {
-                    addChatMessage(ChatEntry.ErrorMessage("Error: API Key missing in Settings."))
+                    val error = "Error: API Key missing in Settings."
+                    addChatMessage(ChatEntry.ErrorMessage(error))
                     return@launch
                 }
                 
@@ -217,12 +281,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     _lastLookupResult.value = result
                     addChatMessage(ChatEntry.IntelReport(result))
                 } else {
-                    addChatMessage(ChatEntry.ErrorMessage("Error: No reputable data found."))
+                    val error = "Error: No reputable data found."
+                    addChatMessage(ChatEntry.ErrorMessage(error))
                 }
             } catch (e: Exception) {
                 val displayMsg = "Error: ${e.message ?: "Technical scan failed."}"
                 addChatMessage(ChatEntry.ErrorMessage(displayMsg))
-                Log.e(TAG, "Scan Failure", e)
+                logToConsole("INVESTIGATION", "Lookup failed for $number: $displayMsg", LogLevel.ERROR)
             }
         }
     }
@@ -243,92 +308,142 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             } catch (e: Exception) {
                 val displayMsg = "Error: ${e.message ?: "Deep scan failed."}"
                 addChatMessage(ChatEntry.ErrorMessage(displayMsg))
-                Log.e(TAG, "Deep Scan Failure", e)
+                logToConsole("INVESTIGATION", "Deep lookup failed for $number: $displayMsg", LogLevel.ERROR)
             }
         }
     }
 
     fun clearLookupCache() {
         viewModelScope.launch {
-            dao.clearLookupCache()
-            _lastLookupResult.value = null
+            try {
+                dao.clearLookupCache()
+                _lastLookupResult.value = null
+                logToConsole("DATABASE", "Lookup cache cleared", LogLevel.INFO)
+            } catch (e: Exception) {
+                logToConsole("DATABASE", "Failed to clear cache: ${e.message}", LogLevel.ERROR)
+            }
         }
     }
 
     fun addToBlacklist(number: String, label: String?) {
         viewModelScope.launch {
-            val normalized = PhoneHelper.normalizeToE164(number)
-            dao.insertBlacklistEntry(BlacklistEntry(pattern = normalized, label = label ?: "Manual Block"))
+            try {
+                val normalized = PhoneHelper.normalizeToE164(number)
+                dao.insertBlacklistEntry(BlacklistEntry(pattern = normalized, label = label ?: "Manual Block"))
+                logToConsole("LIST", "Added to Blacklist: $normalized", LogLevel.INFO)
+            } catch (e: Exception) {
+                logToConsole("LIST", "Failed to add to Blacklist: ${e.message}", LogLevel.ERROR)
+            }
         }
     }
 
     fun removeFromBlacklist(entry: BlacklistEntry) {
         viewModelScope.launch {
-            dao.deleteBlacklistEntry(entry)
+            try {
+                dao.deleteBlacklistEntry(entry)
+                logToConsole("LIST", "Removed from Blacklist: ${entry.pattern}", LogLevel.INFO)
+            } catch (e: Exception) {
+                logToConsole("LIST", "Failed to remove from Blacklist: ${e.message}", LogLevel.ERROR)
+            }
         }
     }
 
     fun updateBlacklistLabel(pattern: String, newLabel: String?) {
         viewModelScope.launch {
-            dao.findBlacklistByPattern(pattern)?.let {
-                dao.insertBlacklistEntry(it.copy(label = newLabel ?: "Manual Block"))
+            try {
+                dao.findBlacklistByPattern(pattern)?.let {
+                    dao.insertBlacklistEntry(it.copy(label = newLabel ?: "Manual Block"))
+                    logToConsole("LIST", "Updated Blacklist label: $pattern", LogLevel.INFO)
+                }
+            } catch (e: Exception) {
+                logToConsole("LIST", "Failed to update label: ${e.message}", LogLevel.ERROR)
             }
         }
     }
 
     fun addToWhitelist(number: String, label: String?) {
         viewModelScope.launch {
-            val normalized = PhoneHelper.normalizeToE164(number)
-            dao.insertWhitelistEntry(WhitelistEntry(number = normalized, label = label ?: "Allowed Caller"))
+            try {
+                val normalized = PhoneHelper.normalizeToE164(number)
+                dao.insertWhitelistEntry(WhitelistEntry(number = normalized, label = label ?: "Allowed Caller"))
+                logToConsole("LIST", "Added to Whitelist: $normalized", LogLevel.INFO)
+            } catch (e: Exception) {
+                logToConsole("LIST", "Failed to add to Whitelist: ${e.message}", LogLevel.ERROR)
+            }
         }
     }
 
     fun removeFromWhitelist(entry: WhitelistEntry) {
         viewModelScope.launch {
-            dao.deleteWhitelistEntry(entry)
+            try {
+                dao.deleteWhitelistEntry(entry)
+                logToConsole("LIST", "Removed from Whitelist: ${entry.number}", LogLevel.INFO)
+            } catch (e: Exception) {
+                logToConsole("LIST", "Failed to remove from Whitelist: ${e.message}", LogLevel.ERROR)
+            }
         }
     }
 
     fun updateWhitelistLabel(number: String, newLabel: String?) {
         viewModelScope.launch {
-            dao.findWhitelistByNumber(number)?.let {
-                dao.insertWhitelistEntry(it.copy(label = newLabel ?: "Allowed Caller"))
+            try {
+                dao.findWhitelistByNumber(number)?.let {
+                    dao.insertWhitelistEntry(it.copy(label = newLabel ?: "Allowed Caller"))
+                    logToConsole("LIST", "Updated Whitelist label: $number", LogLevel.INFO)
+                }
+            } catch (e: Exception) {
+                logToConsole("LIST", "Failed to update label: ${e.message}", LogLevel.ERROR)
             }
         }
     }
 
     fun deleteCallLogEntry(log: CallLogEntry) {
         viewModelScope.launch {
-            dao.deleteCallLogEntry(log)
+            try {
+                dao.deleteCallLogEntry(log)
+            } catch (e: Exception) {
+                logToConsole("HISTORY", "Failed to delete log: ${e.message}", LogLevel.ERROR)
+            }
         }
     }
 
     fun clearHistory() {
         viewModelScope.launch {
-            dao.deleteAllCallLogs()
+            try {
+                dao.deleteAllCallLogs()
+                logToConsole("HISTORY", "Call history cleared", LogLevel.INFO)
+            } catch (e: Exception) {
+                logToConsole("HISTORY", "Failed to clear history: ${e.message}", LogLevel.ERROR)
+            }
         }
     }
 
     fun getExportData(isBlacklist: Boolean, onComplete: (String) -> Unit) {
         viewModelScope.launch {
-            val data = if (isBlacklist) {
-                blacklist.value.joinToString("\n") { "${it.pattern},${it.label}" }
-            } else {
-                whitelist.value.joinToString("\n") { "${it.number},${it.label}" }
+            try {
+                val data = if (isBlacklist) {
+                    blacklist.value.joinToString("\n") { "${it.pattern},${it.label}" }
+                } else {
+                    whitelist.value.joinToString("\n") { "${it.number},${it.label}" }
+                }
+                onComplete(data)
+            } catch (e: Exception) {
+                logToConsole("EXPORT", "Failed to generate export: ${e.message}", LogLevel.ERROR)
             }
-            onComplete(data)
         }
     }
 
     fun importNumbers(uri: Uri, toBlacklist: Boolean, onComplete: () -> Unit) {
         viewModelScope.launch {
             try {
+                logToConsole("IMPORT", "Starting import from URI", LogLevel.INFO)
                 getApplication<Application>().contentResolver.openInputStream(uri)?.use { stream ->
                     val text = Scanner(stream).useDelimiter("\\A").next()
                     handleBulkProcessing(text, toBlacklist)
                 }
+                logToConsole("IMPORT", "Successfully processed import", LogLevel.INFO)
             } catch (e: Exception) {
-                Log.e(TAG, "Import failed", e)
+                logToConsole("IMPORT", "Import failed: ${e.message}", LogLevel.ERROR)
             }
             onComplete()
         }
@@ -336,7 +451,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun pasteNumbers(text: String, toBlacklist: Boolean, onComplete: () -> Unit) {
         viewModelScope.launch {
-            handleBulkProcessing(text, toBlacklist)
+            try {
+                handleBulkProcessing(text, toBlacklist)
+                logToConsole("IMPORT", "Successfully processed pasted text", LogLevel.INFO)
+            } catch (e: Exception) {
+                logToConsole("IMPORT", "Paste failed: ${e.message}", LogLevel.ERROR)
+            }
             onComplete()
         }
     }
