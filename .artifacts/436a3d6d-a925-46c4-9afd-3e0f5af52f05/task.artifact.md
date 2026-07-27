@@ -1,0 +1,11 @@
+- [ ] Update `settings.gradle.kts`
+- [ ] Update `strings.xml`
+- [ ] Update `themes.xml`
+- [ ] Update `AndroidManifest.xml`
+- [ ] Update `Theme.kt` and `MainActivity.kt`
+- [ ] Rename and update `CallFilterDao`
+- [ ] Rename and update `CallFilterService`
+- [ ] Rename and update `CallFilterEngine`
+- [ ] Update `AppDatabase.kt`
+- [ ] Update references in other files (`SmsFilterReceiver.kt`, `MainViewModel.kt`, `ListManagementScreen.kt`, `SpamSyncWorker.kt`, `GeminiManager.kt`)
+- [ ] Verify build

@@ -1,0 +1,37 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="288dp"
+    android:height="288dp"
+    android:viewportWidth="200"
+    android:viewportHeight="200">
+
+    <!-- Circle Background for the Shield -->
+    <path
+        android:fillColor="#1A237E"
+        android:pathData="M100,100m-90,0a90,90 0,1 1,180 0a90,90 0,1 1,-180 0" />
+
+    <!-- Main Shield Icon -->
+    <path
+        android:fillColor="#2196F3"
+        android:pathData="M100,45L65,58v45c0,21.5 15,41.5 35,46.5 20,-5 35,-25 35,-46.5V58L100,45z" />
+
+    <!-- Shield Inner Detail -->
+    <path
+        android:fillColor="#1976D2"
+        android:pathData="M100,49L69,60v41c0,18.5 13.5,36 31,40.5 17.5,-4.5 31,-22 31,-40.5V60L100,49z" />
+
+    <!-- Protection Checkmark -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M95,115l-12,-12 5,-5 7,7 16,-16 5,5z" />
+
+    <!-- App Name Text (Represented as Paths for Logo) -->
+    <!-- "CALL GUARD SHIELD" stylized -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M50,165h10v3h-10z M65,165h10v3h-10z M80,165h10v3h-10z M95,165h10v3h-10z M110,165h10v3h-10z M125,165h10v3h-10z M140,165h10v3h-10z" />
+
+    <!-- Using a simpler approach: Just the Shield for the icon,
+         and we can rely on the user seeing the theme.
+         Actually, let's just make the shield very prominent and professional. -->
+
+</vector>
