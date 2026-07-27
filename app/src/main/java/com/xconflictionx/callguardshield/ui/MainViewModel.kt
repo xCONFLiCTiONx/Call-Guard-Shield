@@ -208,7 +208,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     return@launch
                 }
                 
-                addChatMessage(ChatEntry.UserMessage("📡 Connecting to Gemini Intel Engine..."))
+                val model = settings.value.selectedGeminiModel
+                addChatMessage(ChatEntry.UserMessage("📡 Connection: $model (Search Grounding: On)"))
+                
                 val result = getLookupService().lookup(setOf(number, PhoneHelper.normalizeToE164(number)))
                 
                 if (result != null) {
@@ -228,8 +230,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun refineInvestigation(number: String) {
         viewModelScope.launch {
             clearChat()
-            addChatMessage(ChatEntry.UserMessage("🔍 CRITICAL RE-VERIFICATION started for: $number..."))
-            addChatMessage(ChatEntry.UserMessage("📡 Cross-referencing multiple technical sources..."))
+            val model = settings.value.selectedGeminiModel
+            addChatMessage(ChatEntry.UserMessage("🔍 CRITICAL RE-VERIFICATION: $number"))
+            addChatMessage(ChatEntry.UserMessage("📡 Using model: $model (Deep Cross-Reference)"))
             try {
                 val result = getLookupService().lookupDeep(number)
                 if (result != null) {

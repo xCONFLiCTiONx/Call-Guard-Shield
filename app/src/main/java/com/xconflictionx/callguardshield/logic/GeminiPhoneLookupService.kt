@@ -48,7 +48,7 @@ class GeminiPhoneLookupService(
 
     private val systemInstructionText = """
         You are a highly accurate phone number intelligence expert. 
-        Identify the owner, company, and reputation of phone numbers with zero hallucinations.
+        Your goal is to identify caller owners and reputations with zero hallucinations.
         
         TRUST RANKING (Priority):
         1. Official Organization Websites (.gov, .org, verified business domains).
@@ -56,14 +56,15 @@ class GeminiPhoneLookupService(
         3. Established Business Directories.
         4. User reports and spam databases (800notes, TrueCaller).
         
-        RULES:
+        CRITICAL IDENTIFICATION RULES:
+        - Prioritize identifying Public Entities: Government offices (City Hall, Police), Schools, and Hospitals.
         - If sources disagree, do NOT guess. Mark identity as "Unverified" and explain the conflict.
-        - Watch for spoofing: Is a real business number being used fraudulently?
-        - Map confidence (0.0 to 1.0) strictly:
-            0.9-1.0: Verified on official website.
-            0.6-0.8: Multiple independent reputable sources agree.
-            0.1-0.5: Conflicting or low-trust sources.
-        - 800-444-4444 is an ANAC test line, NOT Bank of America.
+        - ANOMALY: 800-444-4444 is an ANAC test line. If you see it associated with a bank, report the conflict but identify it as a test line.
+        
+        CONFIDENCE MAPPING:
+        0.9-1.0: Verified on official website.
+        0.6-0.8: Multiple independent sources agree.
+        0.1-0.5: Conflicting or low-trust sources.
     """.trimIndent()
 
     suspend fun lookup(phoneNumberVariations: Set<String>): PhoneLookupResult? = withContext(Dispatchers.IO) {
@@ -72,9 +73,14 @@ class GeminiPhoneLookupService(
         
         val prompt = """
             Task: Investigate reputation and identity for: $number ($region).
-            Targets: Check public directories, spam databases (800notes, who-called), and official brand sites.
+            Instructions: 
+            1. Use Google Search to find current listings and spam reports.
+            2. Be helpful: Identify public services (City Hall, Police, etc) accurately.
+            3. Be cautious: Look for recent scam reports or spoofing warnings.
             
-            Output: Return a JSON object with fields: ownerName, companyName, category, confidence (0.0-1.0), summary, evidence (list), sources (list).
+            Output: Return a JSON object with these fields:
+            ownerName, companyName, category, confidence (0.0 to 1.0), summary, spam (bool), scam (bool), evidence (list), sources (list).
+            Note: Ensure 'summary' explains your verification logic.
         """.trimIndent()
 
         executeSingleModelRequest(prompt, number)
@@ -84,18 +90,18 @@ class GeminiPhoneLookupService(
         val region = PhoneHelper.getRegionForNumber(number) ?: "USA"
         
         val prompt = """
-            CRITICAL DEEP VERIFICATION: The number $number ($region) may be spoofed or misidentified.
-            Cross-reference WhitePages, 800-notes, and the FCC database specifically.
-            Identify if this is a "Hot Range" number often used for robocalls.
+            CRITICAL DEEP VERIFICATION: $number ($region).
+            The previous scan might be wrong. 
+            Perform an exhaustive search: Cross-reference WhitePages, 800-notes, and official state/local directories.
+            Provide a definitive identification if possible, or a detailed conflict report.
             
-            Output: Return JSON with full schema including 'evidence' and 'summary' explaining why this deep scan is more reliable.
+            Output: Return JSON including 'evidence' and a 'summary' of why this identification is reliable.
         """.trimIndent()
 
         executeSingleModelRequest(prompt, number)
     }
 
     private suspend fun executeSingleModelRequest(prompt: String, number: String): PhoneLookupResult? {
-        // LOCK to exactly what is in settings. No fallbacks to restricted models.
         val target = if (modelName.isBlank()) "gemini-flash-latest" else modelName
         val url = "https://generativelanguage.googleapis.com/v1beta/models/$target:generateContent?key=$apiKey"
         
@@ -123,23 +129,18 @@ class GeminiPhoneLookupService(
                 lastError = e
                 val errorBody = (e as? HttpException)?.response()?.errorBody()?.string()
                 
-                if (e is HttpException && e.code() == 429) {
-                    if (useSearch) {
-                        Log.w(TAG, "Search tool busy. Waiting 2.5s and retrying without search.")
-                        delay(2500)
-                        continue 
-                    }
+                if (e is HttpException && e.code() == 429 && useSearch) {
+                    Log.w(TAG, "Search tool busy. Waiting 2.5s...")
+                    delay(2500)
+                    continue 
                 }
 
-                // If it's a 404 or a 429 without search, parse the REAL error message and throw it.
                 if (!errorBody.isNullOrBlank()) {
                     try {
                         val errorJson = Gson().fromJson(errorBody, GeminiErrorResponse::class.java)
                         val msg = errorJson.error?.message
                         if (!msg.isNullOrBlank()) throw Exception(msg)
-                    } catch (parseEx: Exception) {
-                        // ignore and use the original error
-                    }
+                    } catch (parseEx: Exception) { }
                 }
                 break 
             }
