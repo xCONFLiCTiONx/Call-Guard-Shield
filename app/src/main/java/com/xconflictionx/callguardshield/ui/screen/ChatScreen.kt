@@ -110,15 +110,16 @@ fun ChatScreen(viewModel: MainViewModel) {
         // Progress Bar Section
         if (isIdentifying) {
             Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
-                if (bulkProgress != null) {
+                val progressValue = bulkProgress
+                if (progressValue != null) {
                     LinearProgressIndicator(
-                        progress = { bulkProgress!! },
+                        progress = { progressValue },
                         modifier = Modifier.fillMaxWidth(),
                         color = MaterialTheme.colorScheme.primary,
                         trackColor = MaterialTheme.colorScheme.surfaceVariant,
                     )
                     Text(
-                        text = "Bulk scan progress: ${(bulkProgress!! * 100).toInt()}%",
+                        text = "Bulk scan progress: ${(progressValue * 100).toInt()}%",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.padding(top = 4.dp).align(Alignment.CenterHorizontally)

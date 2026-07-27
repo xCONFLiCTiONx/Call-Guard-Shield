@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.provider.ContactsContract
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -23,6 +24,8 @@ import androidx.compose.ui.unit.dp
 import com.xconflictionx.callguardshield.data.entity.CallLogEntry
 import com.xconflictionx.callguardshield.ui.MainViewModel
 import com.xconflictionx.callguardshield.ui.component.NumberActionMenu
+import com.xconflictionx.callguardshield.ui.component.NumberDetailsSheet
+import com.xconflictionx.callguardshield.ui.component.EditNumberDetailsDialog
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -30,8 +33,12 @@ import java.util.*
 @Composable
 fun HistoryScreen(viewModel: MainViewModel, onNavigateToChat: () -> Unit) {
     val logs by viewModel.callLogs.collectAsState()
+    val selectedNumberIntel by viewModel.selectedNumberIntel.collectAsState()
+    val isIdentifying by viewModel.isIdentifying.collectAsState()
     val context = LocalContext.current
     var selectedItem by remember { mutableStateOf<Pair<String, String?>?>(null) }
+    var showSettings by remember { mutableStateOf(false) }
+    var showDetailsEditor by remember { mutableStateOf(false) }
     var showClearDialog by remember { mutableStateOf(false) }
 
     Scaffold(
@@ -60,8 +67,10 @@ fun HistoryScreen(viewModel: MainViewModel, onNavigateToChat: () -> Unit) {
                     CallLogItem(
                         log = log,
                         onClick = { 
-                            // Pass the best identity name to the popup menu
-                            selectedItem = log.number to (log.callerName ?: log.callerId ?: "Unknown") 
+                            selectedItem = log.number to (log.callerName ?: log.callerId ?: "Unknown")
+                            showSettings = false
+                            // Load the full Gemini intel for this number
+                            viewModel.fetchIntelForNumber(log.number)
                         }
                     )
                     HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = Color.Gray.copy(alpha = 0.2f))
@@ -92,12 +101,34 @@ fun HistoryScreen(viewModel: MainViewModel, onNavigateToChat: () -> Unit) {
                 )
             }
 
-            selectedItem?.let { (number, label) ->
+            // Show Details Sheet first (primary view)
+            if (!showSettings && selectedItem != null) {
+                val (number, label) = selectedItem!!
+                NumberDetailsSheet(
+                    number = number,
+                    label = label,
+                    intelResult = selectedNumberIntel,
+                    isIdentifying = isIdentifying,
+                    onDismiss = { selectedItem = null },
+                    onOpenSettings = { showSettings = true },
+                    onIdentify = {
+                        viewModel.performInvestigation(number)
+                        onNavigateToChat()
+                    }
+                )
+            }
+
+            // Show Settings/Actions Menu (opened from Details Sheet)
+            if (showSettings && selectedItem != null) {
+                val (number, label) = selectedItem!!
                 val logEntry = logs.find { it.number == number }
                 NumberActionMenu(
                     number = number,
                     label = label,
-                    onDismiss = { selectedItem = null },
+                    onDismiss = { 
+                        showSettings = false
+                        selectedItem = null
+                    },
                     onIdentify = {
                         viewModel.setAutoQuery(number, label)
                         onNavigateToChat()
@@ -108,8 +139,29 @@ fun HistoryScreen(viewModel: MainViewModel, onNavigateToChat: () -> Unit) {
                         logEntry?.let { viewModel.deleteCallLogEntry(it) }
                     },
                     removeLabel = "Delete from History",
+                    onEditLabel = {
+                        showSettings = false
+                        showDetailsEditor = true
+                    },
                     onAddToContacts = { launchAddContactIntent(context, number) },
                     onCall = { launchCallIntent(context, number) }
+                )
+            }
+
+            if (showDetailsEditor && selectedItem != null) {
+                val (number, _) = selectedItem!!
+                EditNumberDetailsDialog(
+                    number = number,
+                    initialIntel = selectedNumberIntel,
+                    onDismiss = { 
+                        showDetailsEditor = false
+                        selectedItem = null
+                    },
+                    onConfirm = { updatedIntel ->
+                        viewModel.updateFullNumberDetails(number, updatedIntel, null)
+                        showDetailsEditor = false
+                        selectedItem = null
+                    }
                 )
             }
         }
@@ -224,29 +276,6 @@ fun CallLogItem(
                 )
             }
             
-            log.callerInfo?.let { 
-                Spacer(modifier = Modifier.height(12.dp))
-                Surface(
-                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.8f), // Darker surface for better contrast
-                    shape = MaterialTheme.shapes.small,
-                    border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
-                ) {
-                    Column(modifier = Modifier.padding(12.dp)) {
-                        Text(
-                            text = "Gemini Intelligence Report",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.primary,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Spacer(modifier = Modifier.height(6.dp))
-                        Text(
-                            text = it,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant // High-contrast text
-                        )
-                    }
-                }
-            }
         }
     }
 }

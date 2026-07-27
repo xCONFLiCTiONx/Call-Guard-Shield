@@ -232,6 +232,48 @@ fun SettingsScreen(viewModel: MainViewModel) {
 
         item {
             Text(
+                "Monthly Database Maintenance",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold
+            )
+        }
+
+        item {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    SettingToggle(
+                        title = "Auto-Refresh Intel (30 Days)",
+                        description = "Automatically re-scan all lists every month to verify names and spam status.",
+                        checked = settings?.autoMaintenanceEnabled ?: false,
+                        onCheckedChange = { viewModel.updateAutoMaintenance(it) }
+                    )
+                    
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp), color = Color.Gray.copy(alpha = 0.2f))
+                    
+                    val lastMaint = settings?.lastMaintenanceTime ?: 0L
+                    val maintText = if (lastMaint == 0L) "Never refreshed" else "Last re-scan: " + SimpleDateFormat("MMM dd, HH:mm", Locale.getDefault()).format(Date(lastMaint))
+                    
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(maintText, style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+                        Button(
+                            onClick = { viewModel.runMaintenanceNow() },
+                            shape = MaterialTheme.shapes.small
+                        ) {
+                            Text("Run Now", style = MaterialTheme.typography.labelSmall)
+                        }
+                    }
+                }
+            }
+        }
+
+        item {
+            Text(
                 "Background Protection",
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold

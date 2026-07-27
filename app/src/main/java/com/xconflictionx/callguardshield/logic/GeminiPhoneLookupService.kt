@@ -51,6 +51,12 @@ class GeminiPhoneLookupService(
         You are a highly accurate phone number intelligence expert. 
         Your goal is to identify caller owners and reputations with zero hallucinations.
         
+        STRICT OUTPUT FORMAT:
+        - Return ONLY a single JSON object.
+        - 'evidence' MUST be a list of simple text strings.
+        - 'sources' MUST be a list of simple text strings.
+        - DO NOT nest objects or complex structures inside lists.
+        
         TRUST RANKING (Priority):
         1. Official Organization Websites (.gov, .org, verified business domains).
         2. Telecom Carrier/ANAC announcement data (identify if it's a test line).
@@ -68,22 +74,26 @@ class GeminiPhoneLookupService(
         0.1-0.5: Conflicting or low-trust sources.
     """.trimIndent()
 
-    suspend fun lookup(phoneNumberVariations: Set<String>): PhoneLookupResult? = withContext(Dispatchers.IO) {
+    suspend fun lookup(phoneNumberVariations: Set<String>, forceRefresh: Boolean = false): PhoneLookupResult? = withContext(Dispatchers.IO) {
         val number = phoneNumberVariations.first()
         
-        // 1. Check Cache First
-        try {
-            val cached = dao.getLookupResult(number)
-            if (cached != null) {
-                val age = System.currentTimeMillis() - cached.lookupDate
-                val thirtyDays = 30L * 24 * 60 * 60 * 1000
-                if (age < thirtyDays) {
-                    Log.d(TAG, "Using cached result for $number")
-                    return@withContext cached.copy(isCached = true)
+        // 1. Check Cache First (Unless forced)
+        if (!forceRefresh) {
+            try {
+                val cached = dao.getLookupResult(number)
+                if (cached != null) {
+                    val age = System.currentTimeMillis() - cached.lookupDate
+                    val thirtyDays = 30L * 24 * 60 * 60 * 1000
+                    if (age < thirtyDays) {
+                        Log.d(TAG, "Using cached result for $number")
+                        return@withContext cached.copy(isCached = true)
+                    }
                 }
+            } catch (e: Exception) {
+                Log.e(TAG, "Cache read failed: ${e.message}")
             }
-        } catch (e: Exception) {
-            Log.e(TAG, "Cache read failed: ${e.message}")
+        } else {
+            Log.i(TAG, "Forced refresh requested for $number")
         }
 
         val region = PhoneHelper.getRegionForNumber(number) ?: "USA"
@@ -93,7 +103,7 @@ class GeminiPhoneLookupService(
             Targets: Check public directories, spam databases (800notes, who-called), and official brand sites.
             
             Output: Return a JSON object with these fields:
-            ownerName, companyName, category, confidence (0.0 to 1.0), summary, spam (bool), scam (bool), evidence (list), sources (list).
+            ownerName (string), companyName (string), category (string), confidence (0.0 to 1.0), summary (string), spam (bool), scam (bool), evidence (list of strings), sources (list of strings).
             Note: Ensure 'summary' explains your verification logic.
         """.trimIndent()
 
@@ -120,7 +130,7 @@ class GeminiPhoneLookupService(
             Perform an exhaustive search: Cross-reference WhitePages, 800-notes, and official state/local directories.
             Provide a definitive identification if possible, or a detailed conflict report.
             
-            Output: Return JSON including 'evidence' and a 'summary' of why this identification is reliable.
+            Output: Return JSON including 'evidence' (list of strings) and a 'summary' (string) of why this identification is reliable.
         """.trimIndent()
 
         executeSingleModelRequest(prompt, number)
@@ -147,9 +157,15 @@ class GeminiPhoneLookupService(
                 val json = response.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text ?: continue
                 
                 val cleanJson = json.trim().removePrefix("```json").removeSuffix("```").trim()
-                val result = Gson().fromJson(cleanJson, PhoneLookupResult::class.java)
-
-                return result.copy(phoneNumber = number, lookupDate = System.currentTimeMillis())
+                
+                return try {
+                    val result = Gson().fromJson(cleanJson, PhoneLookupResult::class.java)
+                    result.copy(phoneNumber = number, lookupDate = System.currentTimeMillis())
+                } catch (e: Exception) {
+                    Log.e(TAG, "JSON Parsing failed for $number: ${e.message}")
+                    // Fallback: If evidence/sources are the problem, try to extract them manually or return partial
+                    throw Exception("Intelligence data format error. Gemini returned complex data types. Please try again.")
+                }
             } catch (e: Exception) {
                 lastError = e
                 val errorBody = (e as? HttpException)?.response()?.errorBody()?.string()

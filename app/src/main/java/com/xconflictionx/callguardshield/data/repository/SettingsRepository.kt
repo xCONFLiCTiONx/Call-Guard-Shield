@@ -21,6 +21,8 @@ class SettingsRepository(private val context: Context) {
         val ENABLED_DICTIONARIES = stringSetPreferencesKey("enabled_dictionaries")
         val SHOW_CONTACTS_IN_HISTORY = booleanPreferencesKey("show_contacts_in_history")
         val LAST_SYNC_TIME = longPreferencesKey("last_sync_time")
+        val LAST_MAINTENANCE_TIME = longPreferencesKey("last_maintenance_time")
+        val AUTO_MAINTENANCE_ENABLED = booleanPreferencesKey("auto_maintenance_enabled")
         val CACHE_AGE_DAYS = intPreferencesKey("cache_age_days")
         val SELECTED_GEMINI_MODEL = stringPreferencesKey("selected_gemini_model")
     }
@@ -36,8 +38,10 @@ class SettingsRepository(private val context: Context) {
             enabledDictionaries = preferences[PreferencesKeys.ENABLED_DICTIONARIES] ?: emptySet(),
             showContactsInHistory = preferences[PreferencesKeys.SHOW_CONTACTS_IN_HISTORY] ?: false,
             lastSyncTime = preferences[PreferencesKeys.LAST_SYNC_TIME] ?: 0L,
+            lastMaintenanceTime = preferences[PreferencesKeys.LAST_MAINTENANCE_TIME] ?: 0L,
+            autoMaintenanceEnabled = preferences[PreferencesKeys.AUTO_MAINTENANCE_ENABLED] ?: false,
             cacheAgeDays = preferences[PreferencesKeys.CACHE_AGE_DAYS] ?: 30,
-            selectedGeminiModel = preferences[PreferencesKeys.SELECTED_GEMINI_MODEL] ?: "gemini-2.5-flash"
+            selectedGeminiModel = preferences[PreferencesKeys.SELECTED_GEMINI_MODEL] ?: "gemini-1.5-flash"
         )
     }
 
@@ -77,6 +81,14 @@ class SettingsRepository(private val context: Context) {
         context.dataStore.edit { it[PreferencesKeys.LAST_SYNC_TIME] = time }
     }
 
+    suspend fun updateLastMaintenanceTime(time: Long) {
+        context.dataStore.edit { it[PreferencesKeys.LAST_MAINTENANCE_TIME] = time }
+    }
+
+    suspend fun updateAutoMaintenanceEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[PreferencesKeys.AUTO_MAINTENANCE_ENABLED] = enabled }
+    }
+
     suspend fun updateCacheAgeDays(days: Int) {
         context.dataStore.edit { it[PreferencesKeys.CACHE_AGE_DAYS] = days }
     }
@@ -96,6 +108,8 @@ data class UserSettings(
     val enabledDictionaries: Set<String>,
     val showContactsInHistory: Boolean,
     val lastSyncTime: Long,
+    val lastMaintenanceTime: Long,
+    val autoMaintenanceEnabled: Boolean,
     val cacheAgeDays: Int,
     val selectedGeminiModel: String
 )

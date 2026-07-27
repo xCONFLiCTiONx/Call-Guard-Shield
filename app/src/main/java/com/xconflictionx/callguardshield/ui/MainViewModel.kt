@@ -18,6 +18,7 @@ import com.xconflictionx.callguardshield.worker.BulkIdentifyWorker
 import com.xconflictionx.callguardshield.worker.SpamSyncWorker
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.isActive
 import java.util.Scanner
 import java.util.UUID
 
@@ -30,7 +31,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val settingsRepo = SettingsRepository(application)
     
     // UI State
-    val settings = settingsRepo.settingsFlow.stateIn(viewModelScope, SharingStarted.Eagerly, UserSettings(false, false, false, false, false, false, emptySet(), false, 0L, 30, "gemini-flash-latest"))
+    val settings = settingsRepo.settingsFlow.stateIn(viewModelScope, SharingStarted.Eagerly, UserSettings(false, false, false, false, false, false, emptySet(), false, 0L, 0L, false, 30, "gemini-1.5-flash"))
     val callLogs = dao.getAllCallLogs().stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
     val blacklist = dao.getBlacklist().stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
     val whitelist = dao.getWhitelist().stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
@@ -74,6 +75,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _bulkNumber = MutableStateFlow<String?>(null)
     val bulkNumber = _bulkNumber.asStateFlow()
+
+    private val _selectedNumberIntel = MutableStateFlow<PhoneLookupResult?>(null)
+    val selectedNumberIntel = _selectedNumberIntel.asStateFlow()
+
+    fun fetchIntelForNumber(number: String) {
+        viewModelScope.launch {
+            _selectedNumberIntel.value = dao.getLookupResult(number)
+        }
+    }
 
     private fun getLookupService(): GeminiPhoneLookupService {
         return GeminiPhoneLookupService(
@@ -327,13 +337,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 if (apiKey.isNullOrBlank()) {
                     val error = "Error: API Key missing in Settings."
                     addChatMessage(ChatEntry.ErrorMessage(error))
+                    logToConsole("INVESTIGATION", error, LogLevel.ERROR)
                     return@launch
                 }
                 
                 val model = settings.value.selectedGeminiModel
                 addChatMessage(ChatEntry.UserMessage("📡 Connection: $model (Search Grounding: On)"))
                 
-                val result = getLookupService().lookup(setOf(number, PhoneHelper.normalizeToE164(number)))
+                // FORCE REFRESH: Manual single scan always fetches fresh data
+                val result = getLookupService().lookup(setOf(number, PhoneHelper.normalizeToE164(number)), forceRefresh = true)
                 
                 if (result != null) {
                     _lastLookupResult.value = result
@@ -463,10 +475,107 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun performBulkInvestigation(isBlacklist: Boolean) {
+        if (_isIdentifying.value) {
+            logToConsole("BULK", "Scan already in progress. Ignoring request.", LogLevel.WARN)
+            return
+        }
+        
+        viewModelScope.launch {
+            _isIdentifying.value = true
+            _bulkProgress.value = 0f
+            clearChat()
+            val listType = if (isBlacklist) "Blacklist" else "Whitelist"
+            addChatMessage(ChatEntry.UserMessage("🚀 Starting Interactive Bulk Scan for $listType..."))
+            logToConsole("BULK", "Starting foreground bulk scan for $listType", LogLevel.INFO)
+
+            try {
+                val apiKey = CryptoManager.getGeminiApiKey(getApplication())
+                if (apiKey.isNullOrBlank()) {
+                    val error = "Error: API Key missing in Settings."
+                    addChatMessage(ChatEntry.ErrorMessage(error))
+                    logToConsole("INVESTIGATION", error, LogLevel.ERROR)
+                    return@launch
+                }
+
+                val listToIdentify = if (isBlacklist) dao.getBlacklistSync() else dao.getWhitelistSync()
+                val total = listToIdentify.size
+                
+                if (total == 0) {
+                    addChatMessage(ChatEntry.ErrorMessage("The $listType is empty. Nothing to scan."))
+                    return@launch
+                }
+
+                addChatMessage(ChatEntry.UserMessage("Checking for numbers Gemini hasn't identified yet in your $listType..."))
+
+                var processedCount = 0
+                listToIdentify.forEachIndexed { index, entry ->
+                    // Check if cancelled or scope closed
+                    if (!isActive) return@forEachIndexed
+                    
+                    val number = if (entry is BlacklistEntry) entry.pattern else (entry as WhitelistEntry).number
+                    
+                    _bulkProgress.value = (index + 1).toFloat() / total
+                    _bulkNumber.value = number
+
+                    // Check if Gemini has a cached result for this number
+                    val existingIntel = dao.getLookupResult(number)
+                    val needsUpdate = existingIntel == null || (existingIntel.companyName == null && existingIntel.ownerName == null)
+
+                    if (needsUpdate) {
+                        try {
+                            val result = getLookupService().lookup(setOf(number))
+                            if (result != null) {
+                                processedCount++
+                                addChatMessage(ChatEntry.IntelReport(result))
+                                
+                                val bestName = result.companyName ?: result.ownerName ?: "Unknown"
+                                if (bestName != "Unknown") {
+                                    val formattedInfo = buildString {
+                                        append("Risk: ${if (result.scam) "HIGH" else if (result.spam) "MEDIUM" else "LOW"} • ")
+                                        append("Acc: ${(result.confidence?.times(100))?.toInt()}% • ")
+                                        append(result.summary?.take(60))
+                                    }
+                                    if (isBlacklist) dao.updateBlacklistLabelByNumber(number, bestName)
+                                    else dao.updateWhitelistLabelByNumber(number, bestName)
+                                    dao.updateCallLogByNumber(number, bestName, formattedInfo)
+                                }
+                            }
+                        } catch (e: Exception) {
+                            val errorMsg = e.message ?: "Unknown error"
+                            addChatMessage(ChatEntry.ErrorMessage("Failed on $number: $errorMsg"))
+                            logToConsole("BULK", "Error processing $number: $errorMsg", LogLevel.ERROR)
+                            
+                            // If it's a critical error (like API Key invalid), abort
+                            if (errorMsg.contains("API key", ignoreCase = true)) return@launch
+                        }
+                        // Rate limit protection
+                        if (index < total - 1) kotlinx.coroutines.delay(2000)
+                    } else {
+                        logToConsole("BULK", "Skipping $number: Already has Gemini intelligence", LogLevel.INFO)
+                    }
+                }
+                
+                addChatMessage(ChatEntry.UserMessage("✅ Bulk scan complete. Processed $processedCount items."))
+                logToConsole("BULK", "Foreground bulk scan finished. Total processed: $processedCount", LogLevel.INFO)
+
+            } catch (e: Exception) {
+                val errorMsg = e.message ?: "Unknown error"
+                addChatMessage(ChatEntry.ErrorMessage("Critical failure: $errorMsg"))
+                logToConsole("BULK", "Foreground bulk scan failed: $errorMsg", LogLevel.ERROR)
+            } finally {
+                _isIdentifying.value = false
+                _bulkProgress.value = null
+                _bulkNumber.value = null
+            }
+        }
+    }
+
     fun bulkIdentify(isBlacklist: Boolean) {
         viewModelScope.launch {
             try {
-                logToConsole("BULK", "Queueing background bulk identification", LogLevel.INFO)
+                val listType = if (isBlacklist) "Blacklist" else "Whitelist"
+                logToConsole("BULK", "Queueing background bulk identification for $listType", LogLevel.INFO)
                 
                 val data = workDataOf("isBlacklist" to isBlacklist)
                 val request = OneTimeWorkRequestBuilder<BulkIdentifyWorker>()
@@ -476,7 +585,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 
                 WorkManager.getInstance(getApplication()).enqueueUniqueWork(
                     "bulk_identify",
-                    ExistingWorkPolicy.KEEP,
+                    ExistingWorkPolicy.REPLACE,
                     request
                 )
                 
@@ -495,13 +604,26 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                                     _isIdentifying.value = false
                                     _bulkProgress.value = null
                                     _bulkNumber.value = null
+                                    logToConsole("BULK", "Bulk identification completed successfully", LogLevel.INFO)
                                 }
-                                WorkInfo.State.FAILED, WorkInfo.State.CANCELLED -> {
+                                WorkInfo.State.FAILED -> {
                                     _isIdentifying.value = false
                                     _bulkProgress.value = null
                                     _bulkNumber.value = null
+                                    logToConsole("BULK", "Bulk identification failed. Check technical logs.", LogLevel.ERROR)
                                 }
-                                else -> {}
+                                WorkInfo.State.CANCELLED -> {
+                                    _isIdentifying.value = false
+                                    _bulkProgress.value = null
+                                    _bulkNumber.value = null
+                                    logToConsole("BULK", "Bulk identification cancelled", LogLevel.WARN)
+                                }
+                                else -> {
+                                    // Handle ENQUEUED or BLOCKED if needed
+                                    if (workInfo.state == WorkInfo.State.ENQUEUED) {
+                                        _isIdentifying.value = true
+                                    }
+                                }
                             }
                         }
                     }.launchIn(viewModelScope)
@@ -534,6 +656,147 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 logToConsole("LIST", "Failed to update label: ${e.message}", LogLevel.ERROR)
             }
         }
+    }
+
+    fun updateFullNumberDetails(number: String, intel: PhoneLookupResult, isBlacklist: Boolean?) {
+        viewModelScope.launch {
+            try {
+                // 1. Update Cache
+                dao.insertLookupResult(intel.copy(phoneNumber = number, lookupDate = System.currentTimeMillis()))
+                
+                // 2. Update List Label (if number exists in either)
+                val bestName = intel.companyName ?: intel.ownerName ?: "Unknown"
+                
+                if (isBlacklist == true) {
+                    dao.updateBlacklistLabelByNumber(number, bestName)
+                } else if (isBlacklist == false) {
+                    dao.updateWhitelistLabelByNumber(number, bestName)
+                } else {
+                    // Try both if we don't know
+                    dao.updateBlacklistLabelByNumber(number, bestName)
+                    dao.updateWhitelistLabelByNumber(number, bestName)
+                }
+                
+                // 3. Update Call Log
+                val formattedInfo = buildString {
+                    append("Risk: ${if (intel.scam) "HIGH" else if (intel.spam) "MEDIUM" else "LOW"} • ")
+                    append("Acc: ${(intel.confidence?.times(100))?.toInt()}% • ")
+                    append(intel.summary?.take(60))
+                }
+                dao.updateCallLogByNumber(number, bestName, formattedInfo)
+                
+                // 4. Update UI state if this was the selected number
+                if (_selectedNumberIntel.value?.phoneNumber == number) {
+                    _selectedNumberIntel.value = intel
+                }
+                
+                logToConsole("SYSTEM", "Manually updated intelligence for $number", LogLevel.INFO)
+            } catch (e: Exception) {
+                logToConsole("SYSTEM", "Failed to update details: ${e.message}", LogLevel.ERROR)
+            }
+        }
+    }
+
+    fun updateAutoMaintenance(enabled: Boolean) {
+        viewModelScope.launch {
+            try {
+                settingsRepo.updateAutoMaintenanceEnabled(enabled)
+                if (enabled) schedulePeriodicMaintenance()
+                else cancelPeriodicMaintenance()
+                logToConsole("SETTINGS", "Auto-Maintenance set to $enabled", LogLevel.INFO)
+            } catch (e: Exception) {
+                logToConsole("SETTINGS", "Failed to update maintenance: ${e.message}", LogLevel.ERROR)
+            }
+        }
+    }
+
+    fun runMaintenanceNow() {
+        viewModelScope.launch {
+            try {
+                logToConsole("BULK", "Manual maintenance scan started (Background)", LogLevel.INFO)
+                
+                val data = workDataOf("isBlacklist" to true, "isMaintenance" to true)
+                val request = OneTimeWorkRequestBuilder<BulkIdentifyWorker>()
+                    .setInputData(data)
+                    .addTag("MAINTENANCE")
+                    .build()
+                
+                WorkManager.getInstance(getApplication()).enqueueUniqueWork(
+                    "manual_maintenance",
+                    ExistingWorkPolicy.REPLACE,
+                    request
+                )
+                
+                // Also run for whitelist
+                val dataWhite = workDataOf("isBlacklist" to false, "isMaintenance" to true)
+                val requestWhite = OneTimeWorkRequestBuilder<BulkIdentifyWorker>()
+                    .setInputData(dataWhite)
+                    .addTag("MAINTENANCE")
+                    .build()
+                
+                WorkManager.getInstance(getApplication()).enqueueUniqueWork(
+                    "manual_maintenance_white",
+                    ExistingWorkPolicy.REPLACE,
+                    requestWhite
+                )
+
+                settingsRepo.updateLastMaintenanceTime(System.currentTimeMillis())
+                
+                // Link UI state to the combined progress of these workers if desired, 
+                // but since user asked for "it keeps scanning if I close the app", 
+                // we mostly rely on the worker. We'll observe the first one for UI feedback.
+                observeWorker(request.id)
+
+            } catch (e: Exception) {
+                logToConsole("BULK", "Failed to start maintenance: ${e.message}", LogLevel.ERROR)
+            }
+        }
+    }
+
+    private fun schedulePeriodicMaintenance() {
+        val request = PeriodicWorkRequestBuilder<BulkIdentifyWorker>(30, java.util.concurrent.TimeUnit.DAYS)
+            .setInputData(workDataOf("isMaintenance" to true))
+            .addTag("PERIODIC_MAINTENANCE")
+            .build()
+        
+        WorkManager.getInstance(getApplication()).enqueueUniquePeriodicWork(
+            "monthly_maintenance",
+            ExistingPeriodicWorkPolicy.UPDATE,
+            request
+        )
+    }
+
+    private fun cancelPeriodicMaintenance() {
+        WorkManager.getInstance(getApplication()).cancelUniqueWork("monthly_maintenance")
+    }
+
+    private fun observeWorker(workerId: UUID) {
+        WorkManager.getInstance(getApplication())
+            .getWorkInfoByIdFlow(workerId)
+            .onEach { workInfo ->
+                if (workInfo != null) {
+                    when (workInfo.state) {
+                        WorkInfo.State.RUNNING -> {
+                            _isIdentifying.value = true
+                            _bulkProgress.value = workInfo.progress.getFloat("progress", 0f)
+                            _bulkNumber.value = workInfo.progress.getString("number")
+                        }
+                        WorkInfo.State.SUCCEEDED -> {
+                            _isIdentifying.value = false
+                            _bulkProgress.value = null
+                            _bulkNumber.value = null
+                            logToConsole("BULK", "Maintenance scan completed successfully", LogLevel.INFO)
+                        }
+                        WorkInfo.State.FAILED -> {
+                            _isIdentifying.value = false
+                            _bulkProgress.value = null
+                            _bulkNumber.value = null
+                            logToConsole("BULK", "Maintenance scan failed", LogLevel.ERROR)
+                        }
+                        else -> {}
+                    }
+                }
+            }.launchIn(viewModelScope)
     }
 
     fun deleteCallLogEntry(log: CallLogEntry) {

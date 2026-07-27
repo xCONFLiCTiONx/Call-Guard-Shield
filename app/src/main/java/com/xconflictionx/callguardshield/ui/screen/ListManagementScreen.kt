@@ -24,12 +24,17 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.xconflictionx.callguardshield.ui.MainViewModel
 import com.xconflictionx.callguardshield.ui.component.NumberActionMenu
+import com.xconflictionx.callguardshield.ui.component.NumberDetailsSheet
+import com.xconflictionx.callguardshield.ui.component.EditNumberDetailsDialog
+import com.xconflictionx.callguardshield.data.entity.BlacklistEntry
+import com.xconflictionx.callguardshield.data.entity.WhitelistEntry
 
 @Composable
 fun ListManagementScreen(viewModel: MainViewModel, onNavigateToChat: () -> Unit) {
     val isIdentifying by viewModel.isIdentifying.collectAsState()
     val bulkProgress by viewModel.bulkProgress.collectAsState()
     val bulkNumber by viewModel.bulkNumber.collectAsState()
+    val selectedNumberIntel by viewModel.selectedNumberIntel.collectAsState()
     var tabIndex by remember { mutableIntStateOf(0) }
     val tabs = listOf("Blacklist", "Whitelist")
     val context = LocalContext.current
@@ -130,7 +135,8 @@ fun ListManagementScreen(viewModel: MainViewModel, onNavigateToChat: () -> Unit)
                 }
 
                 IconButton(onClick = {
-                    viewModel.bulkIdentify(tabIndex == 0)
+                    viewModel.performBulkInvestigation(tabIndex == 0)
+                    onNavigateToChat()
                 }) {
                     Icon(
                         Icons.Default.AutoAwesome, 
@@ -174,9 +180,9 @@ fun ListManagementScreen(viewModel: MainViewModel, onNavigateToChat: () -> Unit)
         }
 
         if (tabIndex == 0) {
-            BlacklistTab(viewModel, onNavigateToChat)
+            BlacklistTab(viewModel, onNavigateToChat, selectedNumberIntel)
         } else {
-            WhitelistTab(viewModel, onNavigateToChat)
+            WhitelistTab(viewModel, onNavigateToChat, selectedNumberIntel)
         }
     }
 }
@@ -267,9 +273,15 @@ fun PasteNumbersDialog(onDismiss: () -> Unit, onConfirm: (String, Boolean) -> Un
 }
 
 @Composable
-fun BlacklistTab(viewModel: MainViewModel, onNavigateToChat: () -> Unit) {
+fun BlacklistTab(
+    viewModel: MainViewModel, 
+    onNavigateToChat: () -> Unit,
+    selectedNumberIntel: com.xconflictionx.callguardshield.data.entity.PhoneLookupResult? = null
+) {
     val blacklist by viewModel.blacklist.collectAsState()
+    val isIdentifying by viewModel.isIdentifying.collectAsState()
     var selectedItem by remember { mutableStateOf<Triple<String, String?, Boolean>?>(null) } 
+    var showSettings by remember { mutableStateOf(false) }
     val context = LocalContext.current
 
     Scaffold { padding ->
@@ -287,49 +299,87 @@ fun BlacklistTab(viewModel: MainViewModel, onNavigateToChat: () -> Unit) {
                         supportingContent = { 
                             if (entry.label != null) Text(entry.pattern)
                         },
-                        modifier = Modifier.clickable { selectedItem = Triple(entry.pattern, entry.label, false) }
+                        modifier = Modifier.clickable { 
+                            selectedItem = Triple(entry.pattern, entry.label, false)
+                            showSettings = false
+                            viewModel.fetchIntelForNumber(entry.pattern)
+                        }
                     )
                 }
             }
 
-            selectedItem?.let { (number, label, isEdit) ->
-                if (!isEdit) {
-                    NumberActionMenu(
-                        number = number,
-                        label = label,
-                        onDismiss = { selectedItem = null },
-                        onIdentify = {
-                            viewModel.setAutoQuery(number, label)
-                            onNavigateToChat()
-                        },
-                        onAddToWhitelist = { l -> viewModel.addToWhitelist(number, l) },
-                        onAddToBlacklist = { l -> viewModel.addToBlacklist(number, l) },
-                        onRemoveFromList = { 
-                            blacklist.find { it.pattern == number }?.let { viewModel.removeFromBlacklist(it) }
-                        },
-                        onEditLabel = { selectedItem = Triple(number, label, true) },
-                        onAddToContacts = { launchAddContactIntent(context, number) },
-                        onCall = { launchCallIntent(context, number) }
-                    )
-                } else {
-                    EditLabelDialog(
-                        initialLabel = label ?: "",
-                        onDismiss = { selectedItem = null },
-                        onConfirm = { newLabel ->
-                            viewModel.updateBlacklistLabel(number, newLabel.ifEmpty { null })
-                            selectedItem = null
-                        }
-                    )
-                }
+            // Show Details Sheet first (primary view)
+            if (!showSettings && selectedItem != null && !selectedItem!!.third) {
+                val (number, label, _) = selectedItem!!
+                NumberDetailsSheet(
+                    number = number,
+                    label = label,
+                    intelResult = selectedNumberIntel,
+                    isIdentifying = isIdentifying,
+                    onDismiss = { selectedItem = null },
+                    onOpenSettings = { showSettings = true },
+                    onIdentify = {
+                        viewModel.performInvestigation(number)
+                        onNavigateToChat()
+                    }
+                )
+            }
+
+            // Show Settings/Actions Menu (opened from Details Sheet)
+            if (showSettings && selectedItem != null && !selectedItem!!.third) {
+                val (number, label, _) = selectedItem!!
+                NumberActionMenu(
+                    number = number,
+                    label = label,
+                    onDismiss = { 
+                        showSettings = false
+                        selectedItem = null
+                    },
+                    onIdentify = {
+                        viewModel.setAutoQuery(number, label)
+                        onNavigateToChat()
+                    },
+                    onAddToWhitelist = { l -> viewModel.addToWhitelist(number, l) },
+                    onAddToBlacklist = { l -> viewModel.addToBlacklist(number, l) },
+                    onRemoveFromList = { 
+                        blacklist.find { it.pattern == number }?.let { viewModel.removeFromBlacklist(it) }
+                    },
+                    onEditLabel = { 
+                        showSettings = false
+                        selectedItem = Triple(number, label, true) 
+                    },
+                    onAddToContacts = { launchAddContactIntent(context, number) },
+                    onCall = { launchCallIntent(context, number) }
+                )
+            }
+
+            // Edit Label dialog (separate from settings)
+            if (selectedItem?.third == true) {
+                val (number, _, _) = selectedItem!!
+                EditNumberDetailsDialog(
+                    number = number,
+                    initialIntel = selectedNumberIntel,
+                    onDismiss = { selectedItem = null },
+                    onConfirm = { updatedIntel ->
+                        viewModel.updateFullNumberDetails(number, updatedIntel, true)
+                        selectedItem = null
+                    }
+                )
             }
         }
     }
 }
 
 @Composable
-fun WhitelistTab(viewModel: MainViewModel, onNavigateToChat: () -> Unit) {
+fun WhitelistTab(
+    viewModel: MainViewModel, 
+    onNavigateToChat: () -> Unit,
+    selectedNumberIntel: com.xconflictionx.callguardshield.data.entity.PhoneLookupResult? = null
+) {
     val whitelist by viewModel.whitelist.collectAsState()
+    val isIdentifying by viewModel.isIdentifying.collectAsState()
     var selectedItem by remember { mutableStateOf<Triple<String, String?, Boolean>?>(null) }
+    var showSettings by remember { mutableStateOf(false) }
     val context = LocalContext.current
 
     Scaffold { padding ->
@@ -347,40 +397,72 @@ fun WhitelistTab(viewModel: MainViewModel, onNavigateToChat: () -> Unit) {
                         supportingContent = { 
                             if (entry.label != null) Text(entry.number)
                         },
-                        modifier = Modifier.clickable { selectedItem = Triple(entry.number, entry.label, false) }
+                        modifier = Modifier.clickable { 
+                            selectedItem = Triple(entry.number, entry.label, false)
+                            showSettings = false
+                            viewModel.fetchIntelForNumber(entry.number)
+                        }
                     )
                 }
             }
 
-            selectedItem?.let { (number, label, isEdit) ->
-                if (!isEdit) {
-                    NumberActionMenu(
-                        number = number,
-                        label = label,
-                        onDismiss = { selectedItem = null },
-                        onIdentify = {
-                            viewModel.setAutoQuery(number, label)
-                            onNavigateToChat()
-                        },
-                        onAddToWhitelist = { l -> viewModel.addToWhitelist(number, l) },
-                        onAddToBlacklist = { l -> viewModel.addToBlacklist(number, l) },
-                        onRemoveFromList = { 
+            // Show Details Sheet first (primary view)
+            if (!showSettings && selectedItem != null && !selectedItem!!.third) {
+                val (number, label, _) = selectedItem!!
+                NumberDetailsSheet(
+                    number = number,
+                    label = label,
+                    intelResult = selectedNumberIntel,
+                    isIdentifying = isIdentifying,
+                    onDismiss = { selectedItem = null },
+                    onOpenSettings = { showSettings = true },
+                    onIdentify = {
+                        viewModel.performInvestigation(number)
+                        onNavigateToChat()
+                    }
+                )
+            }
+
+            // Show Settings/Actions Menu (opened from Details Sheet)
+            if (showSettings && selectedItem != null && !selectedItem!!.third) {
+                val (number, label, _) = selectedItem!!
+                NumberActionMenu(
+                    number = number,
+                    label = label,
+                    onDismiss = { 
+                        showSettings = false
+                        selectedItem = null
+                    },
+                    onIdentify = {
+                        viewModel.setAutoQuery(number, label)
+                        onNavigateToChat()
+                    },
+                    onAddToWhitelist = { l -> viewModel.addToWhitelist(number, l) },
+                    onAddToBlacklist = { l -> viewModel.addToBlacklist(number, l) },
+                    onRemoveFromList = { 
                         whitelist.find { it.number == number }?.let { viewModel.removeFromWhitelist(it) }
                     },
-                        onEditLabel = { selectedItem = Triple(number, label, true) },
-                        onAddToContacts = { launchAddContactIntent(context, number) },
-                        onCall = { launchCallIntent(context, number) }
-                    )
-                } else {
-                    EditLabelDialog(
-                        initialLabel = label ?: "",
-                        onDismiss = { selectedItem = null },
-                        onConfirm = { newLabel ->
-                            viewModel.updateWhitelistLabel(number, newLabel.ifEmpty { null })
-                            selectedItem = null
-                        }
-                    )
-                }
+                    onEditLabel = { 
+                        showSettings = false
+                        selectedItem = Triple(number, label, true) 
+                    },
+                    onAddToContacts = { launchAddContactIntent(context, number) },
+                    onCall = { launchCallIntent(context, number) }
+                )
+            }
+
+            // Edit Label dialog (separate from settings)
+            if (selectedItem?.third == true) {
+                val (number, _, _) = selectedItem!!
+                EditNumberDetailsDialog(
+                    number = number,
+                    initialIntel = selectedNumberIntel,
+                    onDismiss = { selectedItem = null },
+                    onConfirm = { updatedIntel ->
+                        viewModel.updateFullNumberDetails(number, updatedIntel, false)
+                        selectedItem = null
+                    }
+                )
             }
         }
     }

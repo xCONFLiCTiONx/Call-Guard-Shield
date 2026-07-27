@@ -22,40 +22,53 @@ class BulkIdentifyWorker(
 
     override suspend fun doWork(): Result {
         val isBlacklist = inputData.getBoolean("isBlacklist", true)
+        val isMaintenance = inputData.getBoolean("isMaintenance", false)
+        val listType = if (isBlacklist) "Blacklist" else "Whitelist"
+        Log.i("BULK_WORKER", "Starting Bulk Identify (Maintenance=$isMaintenance) for $listType")
+        delay(500) // Brief delay for UI feedback
+        
         val db = AppDatabase.getDatabase(applicationContext)
         val dao = db.callGuardShieldDao()
         val settingsRepo = SettingsRepository(applicationContext)
         
         try {
             val settings = settingsRepo.settingsFlow.first()
-            val apiKey = CryptoManager.getGeminiApiKey(applicationContext) ?: return Result.failure()
+            val apiKey = CryptoManager.getGeminiApiKey(applicationContext)
+            if (apiKey.isNullOrBlank()) {
+                Log.e("BULK_WORKER", "Aborting: Gemini API Key missing in Settings")
+                return Result.failure()
+            }
             val service = GeminiPhoneLookupService(applicationContext, apiKey, settings.selectedGeminiModel, dao)
             
             val listToIdentify = if (isBlacklist) dao.getBlacklistSync() else dao.getWhitelistSync()
+            Log.i("BULK_WORKER", "Found ${listToIdentify.size} entries in $listType")
             
-            if (listToIdentify.isEmpty()) return Result.success()
+            if (listToIdentify.isEmpty()) {
+                Log.i("BULK_WORKER", "Nothing to process (list is empty)")
+                return Result.success()
+            }
 
+            var processedCount = 0
             listToIdentify.forEachIndexed { index, entry ->
                 val number = if (entry is BlacklistEntry) entry.pattern else (entry as WhitelistEntry).number
-                val currentLabel = if (entry is BlacklistEntry) entry.label else (entry as WhitelistEntry).label
 
                 // Update Progress for UI
                 val progress = (index + 1).toFloat() / listToIdentify.size
                 setProgress(workDataOf("progress" to progress, "number" to number))
 
-                // Check for manual labels - don't overwrite if it's already a decent name
-                // unless it's the default "Manual Block", "Imported", etc.
-                val isGenericLabel = currentLabel == null || 
-                    currentLabel == "Manual Block" || 
-                    currentLabel == "Imported" || 
-                    currentLabel == "Allowed Caller"
+                // Maintenance mode refreshes EVERY number (lookup service handles 30-day logic internally if forceRefresh=false)
+                // If not maintenance, we only process numbers Gemini hasn't updated yet.
+                val existingIntel = dao.getLookupResult(number)
+                val needsUpdate = isMaintenance || existingIntel == null || (existingIntel.companyName == null && existingIntel.ownerName == null)
 
-                if (isGenericLabel) {
+                if (needsUpdate) {
                     try {
-                        // This service already has internal 30-day caching, 
-                        // so it will skip rescanning automatically.
-                        val result = service.lookup(setOf(number))
+                        Log.d("BULK_WORKER", "Identifying: $number")
+                        // Maintenance mode doesn't force a refresh, so Gemini service will 
+                        // automatically use cache if it's < 30 days old.
+                        val result = service.lookup(setOf(number), forceRefresh = false)
                         if (result != null) {
+                            processedCount++
                             val bestName = result.companyName ?: result.ownerName ?: "Unknown"
                             
                             // Only update if we found something better than "Unknown"
@@ -76,18 +89,20 @@ class BulkIdentifyWorker(
                     } catch (e: Exception) {
                         Log.e("BULK_WORKER", "Failed on $number: ${e.message}")
                     }
+                } else {
+                    Log.d("BULK_WORKER", "Skipping $number (already has Gemini intelligence)")
+                }
 
-                    // Rate limit protection - only delay if we actually made a network request
-                    // (The service returns instantly if cached)
-                    if (index < listToIdentify.size - 1) {
-                        delay(3500)
-                    }
+                // Rate limit protection - only delay if we actually made a network request
+                if (index < listToIdentify.size - 1 && needsUpdate) {
+                    delay(2000)
                 }
             }
             
+            Log.i("BULK_WORKER", "Bulk Identify completed. Processed $processedCount items.")
             return Result.success()
         } catch (e: Exception) {
-            Log.e("BULK_WORKER", "Critical failure", e)
+            Log.e("BULK_WORKER", "Critical failure during bulk processing", e)
             return Result.retry()
         }
     }
