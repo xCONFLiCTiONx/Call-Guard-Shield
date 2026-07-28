@@ -37,7 +37,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val settingsRepo = SettingsRepository(application)
     
     // UI State
-    val settings = settingsRepo.settingsFlow.stateIn(viewModelScope, SharingStarted.Eagerly, UserSettings(false, false, false, false, false, false, emptySet(), false, 0L, 0L, false, 30, "gemini-1.5-flash"))
+    val settings = settingsRepo.settingsFlow.stateIn(viewModelScope, SharingStarted.Eagerly, UserSettings(false, false, false, false, false, false, emptySet(), false, 0L, 0L, false, 30, "gemini-1.5-flash", false, false, false))
     val callLogs = dao.getAllCallLogs().stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
     val blacklist = dao.getBlacklist().stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
     val whitelist = dao.getWhitelist().stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
@@ -345,6 +345,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun updateAiRealTimeBlocking(enabled: Boolean) {
+        viewModelScope.launch { settingsRepo.updateAiRealTimeBlocking(enabled) }
+    }
+
+    fun updateBlockDebtCollectors(enabled: Boolean) {
+        viewModelScope.launch { settingsRepo.updateBlockDebtCollectors(enabled) }
+    }
+
+    fun updateBlockTelemarketers(enabled: Boolean) {
+        viewModelScope.launch { settingsRepo.updateBlockTelemarketers(enabled) }
+    }
+
     fun setAutoQuery(number: String, label: String?) {
         clearChat() 
         _pendingAutoQuery.value = AutoQuery(number, label)
@@ -494,16 +506,23 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             try {
                 val normalized = PhoneHelper.normalizeToE164(number)
                 
-                // Duplicate check
-                if (dao.findBlacklistByPattern(normalized) != null) {
-                    _uiEvent.emit(UiEvent.ShowToast("This number is already in your Blacklist!"))
-                    return@launch
-                }
+                // 1. If in Whitelist, Move it
                 if (dao.findWhitelistByNumber(normalized) != null) {
-                    _uiEvent.emit(UiEvent.ShowToast("Conflict: This number is currently in your Whitelist!"))
+                    dao.deleteWhitelistByNumber(normalized)
+                    dao.insertBlacklistEntry(BlacklistEntry(pattern = normalized, label = label ?: "Manual Block"))
+                    _uiEvent.emit(UiEvent.ShowToast("Moved to Blacklist"))
+                    logToConsole("LIST", "Moved from Whitelist to Blacklist: $normalized", LogLevel.INFO)
                     return@launch
                 }
 
+                // 2. If already in Blacklist, just update label
+                if (dao.findBlacklistByPattern(normalized) != null) {
+                    dao.insertBlacklistEntry(BlacklistEntry(pattern = normalized, label = label ?: "Manual Block"))
+                    _uiEvent.emit(UiEvent.ShowToast("Updated Blacklist label"))
+                    return@launch
+                }
+
+                // 3. New Addition
                 dao.insertBlacklistEntry(BlacklistEntry(pattern = normalized, label = label ?: "Manual Block"))
                 logToConsole("LIST", "Added to Blacklist: $normalized", LogLevel.INFO)
                 _uiEvent.emit(UiEvent.ShowToast("Added to Blacklist"))
@@ -542,16 +561,23 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             try {
                 val normalized = PhoneHelper.normalizeToE164(number)
                 
-                // Duplicate check
-                if (dao.findWhitelistByNumber(normalized) != null) {
-                    _uiEvent.emit(UiEvent.ShowToast("This number is already in your Whitelist!"))
-                    return@launch
-                }
-                if (dao.findBlacklistMatch(normalized) != null) {
-                    _uiEvent.emit(UiEvent.ShowToast("Conflict: This number is currently in your Blacklist!"))
+                // 1. If in Blacklist, Move it
+                if (dao.findBlacklistByPattern(normalized) != null) {
+                    dao.deleteBlacklistByPattern(normalized)
+                    dao.insertWhitelistEntry(WhitelistEntry(number = normalized, label = label ?: "Allowed Caller"))
+                    _uiEvent.emit(UiEvent.ShowToast("Moved to Whitelist"))
+                    logToConsole("LIST", "Moved from Blacklist to Whitelist: $normalized", LogLevel.INFO)
                     return@launch
                 }
 
+                // 2. If already in Whitelist, just update label
+                if (dao.findWhitelistByNumber(normalized) != null) {
+                    dao.insertWhitelistEntry(WhitelistEntry(number = normalized, label = label ?: "Allowed Caller"))
+                    _uiEvent.emit(UiEvent.ShowToast("Updated Whitelist label"))
+                    return@launch
+                }
+
+                // 3. New Addition
                 dao.insertWhitelistEntry(WhitelistEntry(number = normalized, label = label ?: "Allowed Caller"))
                 logToConsole("LIST", "Added to Whitelist: $normalized", LogLevel.INFO)
                 _uiEvent.emit(UiEvent.ShowToast("Added to Whitelist"))

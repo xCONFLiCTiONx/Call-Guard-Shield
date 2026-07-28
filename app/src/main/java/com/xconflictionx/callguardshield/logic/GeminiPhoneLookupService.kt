@@ -140,11 +140,32 @@ class GeminiPhoneLookupService(
         executeSingleModelRequest(prompt, number)
     }
 
-    private suspend fun executeSingleModelRequest(prompt: String, number: String): PhoneLookupResult? {
+    /**
+     * Optimized for speed (Real-time screening).
+     * Bypasses search tool if necessary or uses a strict timeout.
+     */
+    suspend fun lookupRealTime(number: String): PhoneLookupResult? = withContext(Dispatchers.IO) {
+        // First check cache, always (fastest)
+        try {
+            val cached = dao.getLookupResult(number)
+            if (cached != null) return@withContext cached.copy(isCached = true)
+        } catch (e: Exception) { }
+
+        val prompt = "Real-time Identify: $number. Output JSON (ownerName, companyName, confidence, summary, spam, scam, debtCollector, telemarketer)."
+        
+        try {
+            // Real-time screening uses speed-optimized request (no search grounding by default)
+            executeSingleModelRequest(prompt, number, searchMode = false)
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    private suspend fun executeSingleModelRequest(prompt: String, number: String, searchMode: Boolean? = null): PhoneLookupResult? {
         val target = if (modelName.isBlank()) "gemini-flash-latest" else modelName
         val url = "https://generativelanguage.googleapis.com/v1beta/models/$target:generateContent?key=$apiKey"
         
-        val searchModes = listOf(true, false)
+        val searchModes = if (searchMode != null) listOf(searchMode) else listOf(true, false)
         var lastError: Exception? = null
 
         for (useSearch in searchModes) {

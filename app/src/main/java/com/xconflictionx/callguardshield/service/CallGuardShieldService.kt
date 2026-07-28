@@ -10,10 +10,8 @@ import com.xconflictionx.callguardshield.logic.BlockResult
 import com.xconflictionx.callguardshield.logic.CallGuardShieldEngine
 import com.xconflictionx.callguardshield.logic.CryptoManager
 import com.xconflictionx.callguardshield.logic.GeminiPhoneLookupService
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.launch
 
 class CallGuardShieldService : CallScreeningService() {
 
@@ -35,48 +33,63 @@ class CallGuardShieldService : CallScreeningService() {
                 
                 val responseBuilder = CallResponse.Builder()
                 
-                val isBlocked = result is BlockResult.Block
-                val reason = if (result is BlockResult.Block) result.reason else null
+                var isBlocked = result is BlockResult.Block
+                var reason = if (result is BlockResult.Block) result.reason else null
                 val isContact = when (result) {
                     is BlockResult.Allow -> result.isContact
                     is BlockResult.Block -> result.isContact
                 }
+                
+                // 2. Real-Time AI Screening (if enabled and not already blocked/whitelisted)
+                var aiResult: com.xconflictionx.callguardshield.data.entity.PhoneLookupResult? = null
+                if (!isBlocked && !isContact && phoneNumber != null && settings.aiRealTimeBlocking) {
+                    try {
+                        val apiKey = CryptoManager.getGeminiApiKey(applicationContext)
+                        if (!apiKey.isNullOrBlank()) {
+                            val service = GeminiPhoneLookupService(applicationContext, apiKey, settings.selectedGeminiModel, dao)
+                            // 2-second strict timeout for real-time blocking
+                            aiResult = withTimeoutOrNull(2000) {
+                                service.lookupRealTime(phoneNumber)
+                            }
+                            
+                            aiResult?.let { intel ->
+                                val confidence = intel.confidence ?: 0.0
+                                val isHighConfidence = confidence >= 0.9
+                                
+                                val shouldAiBlock = isHighConfidence && (
+                                    intel.scam || 
+                                    intel.spam || 
+                                    (settings.blockDebtCollectors && intel.debtCollector) ||
+                                    (settings.blockTelemarketers && intel.telemarketer)
+                                )
+                                
+                                if (shouldAiBlock) {
+                                    isBlocked = true
+                                    reason = "AI: ${intel.category ?: "High Risk"} (${(confidence * 100).toInt()}%)"
+                                }
+                            }
+                        }
+                    } catch (e: Exception) {
+                        Log.e("SERVICE_AI", "Real-time AI check failed/timed out", e)
+                    }
+                }
 
-                // Log entry first with system data
+                // 3. Log entry with the best data we have
                 val logEntry = CallLogEntry(
                     number = phoneNumber ?: "Unknown",
                     isBlocked = isBlocked,
                     reason = reason,
                     isContact = isContact,
-                    callerId = systemName
+                    callerId = systemName,
+                    ownerName = aiResult?.ownerName,
+                    companyName = aiResult?.companyName,
+                    callerInfo = aiResult?.let { 
+                        "Risk: ${if (it.scam) "HIGH" else if (it.spam) "MEDIUM" else "LOW"} • Acc: ${(it.confidence?.times(100))?.toInt()}%"
+                    }
                 )
                 
-                val entryId = dao.insertCallLogEntry(logEntry)
+                dao.insertCallLogEntry(logEntry)
                 dao.trimCallLog(100)
-
-                // Background Intel (Non-blocking)
-                if (phoneNumber != null && !isContact) {
-                    launch {
-                        try {
-                            val apiKey = CryptoManager.getGeminiApiKey(applicationContext)
-                            if (!apiKey.isNullOrBlank()) {
-                                val service = GeminiPhoneLookupService(applicationContext, apiKey, settings.selectedGeminiModel, dao)
-                                val intel = service.lookup(setOf(phoneNumber))
-                                intel?.let {
-                                    val bestName = it.companyName ?: it.ownerName ?: "Unknown"
-                                    val formattedInfo = buildString {
-                                        append("Risk: ${if (it.scam) "HIGH" else if (it.spam) "MEDIUM" else "LOW"} • ")
-                                        append("Acc: ${(it.confidence?.times(100))?.toInt()}% • ")
-                                        append(it.summary?.take(60))
-                                    }
-                                    dao.updateCallLogDetailed(entryId, bestName, it.ownerName, it.companyName, formattedInfo)
-                                }
-                            }
-                        } catch (e: Exception) {
-                            Log.e("SERVICE_INTEL", "Bg intel failed", e)
-                        }
-                    }
-                }
 
                 if (isBlocked) {
                     responseBuilder.apply {
@@ -86,6 +99,19 @@ class CallGuardShieldService : CallScreeningService() {
                         setSkipCallLog(true)
                     }
                 } else {
+                    // If not blocked but we have AI data, update history in background with full details
+                    if (aiResult != null && phoneNumber != null) {
+                        launch {
+                            val bestName = aiResult.companyName ?: aiResult.ownerName ?: "Unknown"
+                            val formattedInfo = buildString {
+                                append("Risk: ${if (aiResult.scam) "HIGH" else if (aiResult.spam) "MEDIUM" else "LOW"} • ")
+                                append("Acc: ${(aiResult.confidence?.times(100))?.toInt()}% • ")
+                                append(aiResult.summary?.take(60))
+                            }
+                            dao.updateCallLogByNumber(phoneNumber, bestName, aiResult.ownerName, aiResult.companyName, formattedInfo)
+                        }
+                    }
+                    
                     responseBuilder.apply {
                         setDisallowCall(false)
                         setRejectCall(false)

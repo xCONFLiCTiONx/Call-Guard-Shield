@@ -25,6 +25,9 @@ class SettingsRepository(private val context: Context) {
         val AUTO_MAINTENANCE_ENABLED = booleanPreferencesKey("auto_maintenance_enabled")
         val CACHE_AGE_DAYS = intPreferencesKey("cache_age_days")
         val SELECTED_GEMINI_MODEL = stringPreferencesKey("selected_gemini_model")
+        val AI_REALTIME_BLOCKING = booleanPreferencesKey("ai_realtime_blocking")
+        val BLOCK_DEBT_COLLECTORS = booleanPreferencesKey("block_debt_collectors")
+        val BLOCK_TELEMARKETERS = booleanPreferencesKey("block_telemarketers")
     }
 
     val settingsFlow: Flow<UserSettings> = context.dataStore.data.map { preferences ->
@@ -41,7 +44,10 @@ class SettingsRepository(private val context: Context) {
             lastMaintenanceTime = preferences[PreferencesKeys.LAST_MAINTENANCE_TIME] ?: 0L,
             autoMaintenanceEnabled = preferences[PreferencesKeys.AUTO_MAINTENANCE_ENABLED] ?: false,
             cacheAgeDays = preferences[PreferencesKeys.CACHE_AGE_DAYS] ?: 30,
-            selectedGeminiModel = preferences[PreferencesKeys.SELECTED_GEMINI_MODEL] ?: "gemini-1.5-flash"
+            selectedGeminiModel = preferences[PreferencesKeys.SELECTED_GEMINI_MODEL] ?: "gemini-1.5-flash",
+            aiRealTimeBlocking = preferences[PreferencesKeys.AI_REALTIME_BLOCKING] ?: false,
+            blockDebtCollectors = preferences[PreferencesKeys.BLOCK_DEBT_COLLECTORS] ?: false,
+            blockTelemarketers = preferences[PreferencesKeys.BLOCK_TELEMARKETERS] ?: false
         )
     }
 
@@ -96,6 +102,18 @@ class SettingsRepository(private val context: Context) {
     suspend fun updateSelectedGeminiModel(model: String) {
         context.dataStore.edit { it[PreferencesKeys.SELECTED_GEMINI_MODEL] = model }
     }
+
+    suspend fun updateAiRealTimeBlocking(enabled: Boolean) {
+        context.dataStore.edit { it[PreferencesKeys.AI_REALTIME_BLOCKING] = enabled }
+    }
+
+    suspend fun updateBlockDebtCollectors(block: Boolean) {
+        context.dataStore.edit { it[PreferencesKeys.BLOCK_DEBT_COLLECTORS] = block }
+    }
+
+    suspend fun updateBlockTelemarketers(block: Boolean) {
+        context.dataStore.edit { it[PreferencesKeys.BLOCK_TELEMARKETERS] = block }
+    }
 }
 
 data class UserSettings(
@@ -111,5 +129,8 @@ data class UserSettings(
     val lastMaintenanceTime: Long,
     val autoMaintenanceEnabled: Boolean,
     val cacheAgeDays: Int,
-    val selectedGeminiModel: String
+    val selectedGeminiModel: String,
+    val aiRealTimeBlocking: Boolean,
+    val blockDebtCollectors: Boolean,
+    val blockTelemarketers: Boolean
 )

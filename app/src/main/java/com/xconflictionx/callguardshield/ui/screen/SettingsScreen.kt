@@ -338,6 +338,45 @@ fun SettingsScreen(viewModel: MainViewModel) {
 
         item {
             Text(
+                "AI Protection",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold
+            )
+        }
+
+        item {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    SettingToggle(
+                        title = "Real-Time Gemini Filtering",
+                        description = "Verify unknown callers with AI before the phone rings. (Requires internet)",
+                        checked = settings?.aiRealTimeBlocking ?: false,
+                        onCheckedChange = { viewModel.updateAiRealTimeBlocking(it) }
+                    )
+                    if (settings?.aiRealTimeBlocking == true) {
+                        HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp), color = Color.Gray.copy(alpha = 0.2f))
+                        SettingToggle(
+                            title = "Block Debt Collectors",
+                            description = "Auto-reject calls identified as debt collection services.",
+                            checked = settings?.blockDebtCollectors ?: false,
+                            onCheckedChange = { viewModel.updateBlockDebtCollectors(it) }
+                        )
+                        HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp), color = Color.Gray.copy(alpha = 0.2f))
+                        SettingToggle(
+                            title = "Block Telemarketers",
+                            description = "Auto-reject verified marketing and sales calls.",
+                            checked = settings?.blockTelemarketers ?: false,
+                            onCheckedChange = { viewModel.updateBlockTelemarketers(it) }
+                        )
+                    }
+                }
+            }
+        }
+
+        item {
+            Text(
                 "Background Protection",
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold
