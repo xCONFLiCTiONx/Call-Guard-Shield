@@ -41,7 +41,7 @@ class SpamSyncWorker(
             }
             
             // Otherwise, perform the download
-            dao.deleteGlobalSpamByDictionary("global")
+            val newEntries = mutableListOf<GlobalSpamEntry>()
             
             // 1. Fetch FCC Data (Live Reports)
             val fccJson = fetchUrl("https://opendata.fcc.gov/resource/sr6c-syda.json?\$select=caller_id_number,issue&\$where=caller_id_number%20IS%20NOT%20NULL&\$limit=2000")
@@ -53,7 +53,7 @@ class SpamSyncWorker(
                     val label = obj.optString("issue", "FCC Reported Spam")
                     val normalized = PhoneHelper.normalizeToE164(number)
                     if (normalized.isNotEmpty()) {
-                        dao.insertGlobalSpamEntry(GlobalSpamEntry(pattern = normalized, label = label, dictionaryId = "global"))
+                        newEntries.add(GlobalSpamEntry(pattern = normalized, label = label, dictionaryId = "global"))
                     }
                 }
             }
@@ -67,12 +67,19 @@ class SpamSyncWorker(
                         val prefix = arr.getString(i)
                         val normalized = PhoneHelper.normalizeToE164(prefix)
                         if (normalized.isNotEmpty()) {
-                            dao.insertGlobalSpamEntry(GlobalSpamEntry(pattern = normalized, label = "Verified Robocall Prefix", dictionaryId = "global"))
+                            newEntries.add(GlobalSpamEntry(pattern = normalized, label = "Verified Robocall Prefix", dictionaryId = "global"))
                         }
                     }
                 } catch (e: Exception) {
                     Log.e("SPAM_SYNC", "Failed to parse hot ranges", e)
                 }
+            }
+
+            // Only clear and update if we actually got some data
+            if (newEntries.isNotEmpty()) {
+                dao.deleteGlobalSpamByDictionary("global")
+                newEntries.forEach { dao.insertGlobalSpamEntry(it) }
+                Log.i("SPAM_SYNC", "Sync complete. Added ${newEntries.size} entries.")
             }
             
             settingsRepo.updateLastSyncTime(now)

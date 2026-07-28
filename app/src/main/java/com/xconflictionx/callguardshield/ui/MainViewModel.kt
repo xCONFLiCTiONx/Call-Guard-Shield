@@ -109,8 +109,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     init {
         viewModelScope.launch {
             try {
-                // Fetch first state to check first run
-                val currentSettings = settings.value
+                // Wait for real settings from DataStore (don't use settings.value which is a placeholder in the first frame)
+                val currentSettings = settingsRepo.settingsFlow.first()
                 if (!currentSettings.firstRunSyncComplete) {
                     logToConsole("SYSTEM", "First-run auto-sync triggered", LogLevel.INFO)
                     forceSync()
