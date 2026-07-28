@@ -1,8 +1,8 @@
 {
   "formatVersion": 1,
   "database": {
-    "version": 13,
-    "identityHash": "72d3c9c65ba4fe6fc89e44260e85325b",
+    "version": 14,
+    "identityHash": "fe18f8fb63a85ff0050e202cdae21826",
     "entities": [
       {
         "tableName": "blocked_calls",
@@ -52,14 +52,8 @@
       },
       {
         "tableName": "blacklist",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `pattern` TEXT NOT NULL, `label` TEXT, `source` TEXT NOT NULL)",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`pattern` TEXT NOT NULL, `label` TEXT, `source` TEXT NOT NULL, PRIMARY KEY(`pattern`))",
         "fields": [
-          {
-            "fieldPath": "id",
-            "columnName": "id",
-            "affinity": "INTEGER",
-            "notNull": true
-          },
           {
             "fieldPath": "pattern",
             "columnName": "pattern",
@@ -79,33 +73,16 @@
           }
         ],
         "primaryKey": {
-          "autoGenerate": true,
+          "autoGenerate": false,
           "columnNames": [
-            "id"
+            "pattern"
           ]
-        },
-        "indices": [
-          {
-            "name": "index_blacklist_pattern",
-            "unique": false,
-            "columnNames": [
-              "pattern"
-            ],
-            "orders": [],
-            "createSql": "CREATE INDEX IF NOT EXISTS `index_blacklist_pattern` ON `${TABLE_NAME}` (`pattern`)"
-          }
-        ]
+        }
       },
       {
         "tableName": "whitelist",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `number` TEXT NOT NULL, `label` TEXT)",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`number` TEXT NOT NULL, `label` TEXT, PRIMARY KEY(`number`))",
         "fields": [
-          {
-            "fieldPath": "id",
-            "columnName": "id",
-            "affinity": "INTEGER",
-            "notNull": true
-          },
           {
             "fieldPath": "number",
             "columnName": "number",
@@ -119,22 +96,11 @@
           }
         ],
         "primaryKey": {
-          "autoGenerate": true,
+          "autoGenerate": false,
           "columnNames": [
-            "id"
+            "number"
           ]
-        },
-        "indices": [
-          {
-            "name": "index_whitelist_number",
-            "unique": false,
-            "columnNames": [
-              "number"
-            ],
-            "orders": [],
-            "createSql": "CREATE INDEX IF NOT EXISTS `index_whitelist_number` ON `${TABLE_NAME}` (`number`)"
-          }
-        ]
+        }
       },
       {
         "tableName": "area_code_blocks",
@@ -400,7 +366,7 @@
     ],
     "setupQueries": [
       "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
-      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '72d3c9c65ba4fe6fc89e44260e85325b')"
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'fe18f8fb63a85ff0050e202cdae21826')"
     ]
   }
 }

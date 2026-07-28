@@ -1,11 +1,12 @@
 package com.xconflictionx.callguardshield.ui.component
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -17,7 +18,13 @@ import androidx.compose.ui.unit.dp
 import com.xconflictionx.callguardshield.data.entity.PhoneLookupResult
 
 @Composable
-fun PhoneLookupResultCard(result: PhoneLookupResult, onRefine: (String) -> Unit = {}) {
+fun PhoneLookupResultCard(
+    result: PhoneLookupResult, 
+    wasAutoApplied: Boolean = true,
+    oldConfidence: Double? = null,
+    onRefine: (String) -> Unit = {},
+    onApply: (PhoneLookupResult) -> Unit = {}
+) {
     val confidence = result.confidence ?: 0.0
     val displayConfidence = (confidence * 100).toInt().coerceIn(0, 100)
     val context = LocalContext.current
@@ -39,7 +46,11 @@ fun PhoneLookupResultCard(result: PhoneLookupResult, onRefine: (String) -> Unit 
                     android.widget.Toast.makeText(context, "Summary copied", android.widget.Toast.LENGTH_SHORT).show()
                 })
             },
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+        colors = CardDefaults.cardColors(
+            containerColor = if (!wasAutoApplied) MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.05f) 
+                            else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+        ),
+        border = if (!wasAutoApplied) BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.3f)) else null
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             // Header
@@ -58,10 +69,24 @@ fun PhoneLookupResultCard(result: PhoneLookupResult, onRefine: (String) -> Unit 
                                 shape = MaterialTheme.shapes.extraSmall
                             ) {
                                 Text(
-                                    "CACHED",
+                                    "UP-TO-DATE",
                                     modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
                                     style = MaterialTheme.typography.labelSmall,
                                     color = Color.Gray,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        } else if (wasAutoApplied && oldConfidence != null) {
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Surface(
+                                color = Color.Green.copy(alpha = 0.1f),
+                                shape = MaterialTheme.shapes.extraSmall
+                            ) {
+                                Text(
+                                    "AUTO-UPDATED",
+                                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = Color.Green,
                                     fontWeight = FontWeight.Bold
                                 )
                             }
@@ -80,6 +105,21 @@ fun PhoneLookupResultCard(result: PhoneLookupResult, onRefine: (String) -> Unit 
                         style = MaterialTheme.typography.labelSmall,
                         color = tierColor,
                         fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+
+            if (!wasAutoApplied && oldConfidence != null) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Surface(
+                    color = MaterialTheme.colorScheme.error.copy(alpha = 0.1f),
+                    shape = MaterialTheme.shapes.extraSmall
+                ) {
+                    Text(
+                        text = "⚠️ Conflict: New confidence ($displayConfidence%) is lower than current records (${(oldConfidence * 100).toInt()}%).",
+                        modifier = Modifier.padding(8.dp),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.error
                     )
                 }
             }
@@ -135,6 +175,22 @@ fun PhoneLookupResultCard(result: PhoneLookupResult, onRefine: (String) -> Unit 
 
             Spacer(modifier = Modifier.height(16.dp))
             
+            if (!wasAutoApplied) {
+                var applied by remember { mutableStateOf(false) }
+                Button(
+                    onClick = { 
+                        onApply(result)
+                        applied = true
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = !applied,
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                ) {
+                    Text(if (applied) "Updated Successfully" else "Apply this update anyway")
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+            }
+
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (confidence < 0.8) {
                     OutlinedButton(

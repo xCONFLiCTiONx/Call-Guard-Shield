@@ -3,6 +3,7 @@ package com.xconflictionx.callguardshield.ui
 import android.app.Application
 import android.net.Uri
 import android.util.Log
+import com.google.gson.Gson
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.work.*
@@ -19,10 +20,15 @@ import com.xconflictionx.callguardshield.worker.SpamSyncWorker
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.delay
 import java.util.Scanner
 import java.util.UUID
 
 data class AutoQuery(val number: String, val label: String?)
+
+sealed class UiEvent {
+    data class ShowToast(val message: String) : UiEvent()
+}
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val TAG = "GEMINI_LOG"
@@ -76,8 +82,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _bulkNumber = MutableStateFlow<String?>(null)
     val bulkNumber = _bulkNumber.asStateFlow()
 
+    private val _foregroundNumber = MutableStateFlow<String?>(null)
+    val foregroundNumber = _foregroundNumber.asStateFlow()
+
     private val _selectedNumberIntel = MutableStateFlow<PhoneLookupResult?>(null)
     val selectedNumberIntel = _selectedNumberIntel.asStateFlow()
+
+    private val _uiEvent = MutableSharedFlow<UiEvent>()
+    val uiEvent = _uiEvent.asSharedFlow()
 
     fun fetchIntelForNumber(number: String) {
         viewModelScope.launch {
@@ -95,11 +107,24 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     init {
-        testGeminiKey()
-        refreshGeminiModels()
-        refreshBatteryStatus()
-        refreshLocationStatus()
-        logToConsole("SYSTEM", "MainViewModel initialized", LogLevel.INFO)
+        viewModelScope.launch {
+            try {
+                // Fetch first state to check first run
+                val currentSettings = settings.value
+                if (!currentSettings.firstRunSyncComplete) {
+                    logToConsole("SYSTEM", "First-run auto-sync triggered", LogLevel.INFO)
+                    forceSync()
+                }
+
+                testGeminiKey()
+                refreshGeminiModels()
+                refreshBatteryStatus()
+                refreshLocationStatus()
+                logToConsole("SYSTEM", "MainViewModel initialized", LogLevel.INFO)
+            } catch (e: Exception) {
+                logToConsole("SYSTEM", "Initialization error: ${e.message}", LogLevel.ERROR)
+            }
+        }
     }
 
     fun refreshLocationStatus() {
@@ -289,18 +314,22 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun refreshGeminiModels() {
         viewModelScope.launch {
-            val key = CryptoManager.getGeminiApiKey(getApplication())
-            if (!key.isNullOrBlank()) {
-                try {
-                    val service = GeminiModelService.create()
-                    val response = service.listModels(key)
-                    _availableModels.value = response.models
-                        .filter { it.supportedGenerationMethods.contains("generateContent") }
-                        .map { it.name.substringAfter("models/") }
-                    logToConsole("GEMINI", "Discovered ${_availableModels.value.size} models", LogLevel.INFO)
-                } catch (e: Exception) {
-                    logToConsole("GEMINI", "Failed to fetch models: ${e.message}", LogLevel.ERROR)
+            try {
+                val key = CryptoManager.getGeminiApiKey(getApplication())
+                if (!key.isNullOrBlank()) {
+                    try {
+                        val service = GeminiModelService.create()
+                        val response = service.listModels(key)
+                        _availableModels.value = response.models
+                            .filter { it.supportedGenerationMethods.contains("generateContent") }
+                            .map { it.name.substringAfter("models/") }
+                        logToConsole("GEMINI", "Discovered ${_availableModels.value.size} models", LogLevel.INFO)
+                    } catch (e: Exception) {
+                        logToConsole("GEMINI", "Failed to fetch models: ${e.message}", LogLevel.ERROR)
+                    }
                 }
+            } catch (e: Exception) {
+                logToConsole("CRYPTO", "Failed to access API key: ${e.message}", LogLevel.ERROR)
             }
         }
     }
@@ -328,6 +357,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun performInvestigation(number: String) {
         viewModelScope.launch {
             _isIdentifying.value = true
+            _foregroundNumber.value = number
             _bulkProgress.value = null
             clearChat()
             addChatMessage(ChatEntry.UserMessage("Starting technical intel scan for: $number..."))
@@ -344,24 +374,25 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val model = settings.value.selectedGeminiModel
                 addChatMessage(ChatEntry.UserMessage("📡 Connection: $model (Search Grounding: On)"))
                 
+                // Get current info for comparison
+                val existingIntel = dao.getLookupResult(number)
+
                 // FORCE REFRESH: Manual single scan always fetches fresh data
                 val result = getLookupService().lookup(setOf(number, PhoneHelper.normalizeToE164(number)), forceRefresh = true)
                 
                 if (result != null) {
-                    _lastLookupResult.value = result
-                    addChatMessage(ChatEntry.IntelReport(result))
-                    
-                    // Sync the new intelligence to History and Lists
-                    val bestName = result.companyName ?: result.ownerName ?: "Unknown"
-                    val formattedInfo = buildString {
-                        append("Risk: ${if (result.scam) "HIGH" else if (result.spam) "MEDIUM" else "LOW"} • ")
-                        append("Acc: ${(result.confidence?.times(100))?.toInt()}% • ")
-                        append(result.summary?.take(60))
+                    val newConfidence = result.confidence ?: 0.0
+                    val oldConfidence = existingIntel?.confidence ?: -1.0
+
+                    if (newConfidence > oldConfidence) {
+                        applyInvestigationResult(number, result)
+                        addChatMessage(ChatEntry.IntelReport(result, wasAutoApplied = true, oldConfidence = oldConfidence))
+                        logToConsole("INVESTIGATION", "Auto-updated $number (Higher confidence: $newConfidence > $oldConfidence)", LogLevel.INFO)
+                    } else {
+                        addChatMessage(ChatEntry.IntelReport(result, wasAutoApplied = false, oldConfidence = oldConfidence))
+                        addChatMessage(ChatEntry.UserMessage("⚠️ Note: This result has lower/equal confidence compared to your current data."))
                     }
-                    dao.updateCallLogByNumber(number, bestName, formattedInfo)
-                    dao.updateBlacklistLabelByNumber(number, bestName)
-                    dao.updateWhitelistLabelByNumber(number, bestName)
-                    
+                    _lastLookupResult.value = result
                 } else {
                     val error = "Error: No reputable data found."
                     addChatMessage(ChatEntry.ErrorMessage(error))
@@ -372,6 +403,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 logToConsole("INVESTIGATION", "Lookup failed for $number: $displayMsg", LogLevel.ERROR)
             } finally {
                 _isIdentifying.value = false
+                _foregroundNumber.value = null
                 _investigationStatus.value = null
             }
         }
@@ -380,27 +412,29 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun refineInvestigation(number: String) {
         viewModelScope.launch {
             _isIdentifying.value = true
+            _foregroundNumber.value = number
             clearChat()
             val model = settings.value.selectedGeminiModel
             addChatMessage(ChatEntry.UserMessage("🔍 CRITICAL RE-VERIFICATION: $number"))
             addChatMessage(ChatEntry.UserMessage("📡 Using model: $model (Deep Cross-Reference)"))
             try {
+                // Get current info for comparison
+                val existingIntel = dao.getLookupResult(number)
+
                 val result = getLookupService().lookupDeep(number)
                 if (result != null) {
-                    _lastLookupResult.value = result
-                    addChatMessage(ChatEntry.IntelReport(result))
-                    
-                    // Sync the new deep intelligence to History and Lists
-                    val bestName = result.companyName ?: result.ownerName ?: "Unknown"
-                    val formattedInfo = buildString {
-                        append("Risk: ${if (result.scam) "HIGH" else if (result.spam) "MEDIUM" else "LOW"} • ")
-                        append("Acc: ${(result.confidence?.times(100))?.toInt()}% • ")
-                        append(result.summary?.take(60))
+                    val newConfidence = result.confidence ?: 0.0
+                    val oldConfidence = existingIntel?.confidence ?: -1.0
+
+                    if (newConfidence > oldConfidence) {
+                        applyInvestigationResult(number, result)
+                        addChatMessage(ChatEntry.IntelReport(result, wasAutoApplied = true, oldConfidence = oldConfidence))
+                        logToConsole("INVESTIGATION", "Auto-updated $number via Deep Scan (Higher confidence: $newConfidence > $oldConfidence)", LogLevel.INFO)
+                    } else {
+                        addChatMessage(ChatEntry.IntelReport(result, wasAutoApplied = false, oldConfidence = oldConfidence))
+                        addChatMessage(ChatEntry.UserMessage("⚠️ Deep scan returned lower/equal confidence."))
                     }
-                    dao.updateCallLogByNumber(number, bestName, formattedInfo)
-                    dao.updateBlacklistLabelByNumber(number, bestName)
-                    dao.updateWhitelistLabelByNumber(number, bestName)
-                    
+                    _lastLookupResult.value = result
                 } else {
                     addChatMessage(ChatEntry.ErrorMessage("Error: Even deep search returned no definitive results."))
                 }
@@ -410,8 +444,36 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 logToConsole("INVESTIGATION", "Deep lookup failed for $number: $displayMsg", LogLevel.ERROR)
             } finally {
                 _isIdentifying.value = false
+                _foregroundNumber.value = null
                 _investigationStatus.value = null
             }
+        }
+    }
+
+    suspend fun applyInvestigationResult(number: String, result: PhoneLookupResult) {
+        // Save to cache
+        dao.insertLookupResult(result.copy(phoneNumber = number, lookupDate = System.currentTimeMillis()))
+        
+        // Sync labels
+        val bestName = result.companyName ?: result.ownerName ?: "Unknown"
+        val formattedInfo = buildString {
+            append("Risk: ${if (result.scam) "HIGH" else if (result.spam) "MEDIUM" else "LOW"} • ")
+            append("Acc: ${(result.confidence?.times(100))?.toInt()}% • ")
+            append(result.summary?.take(60))
+        }
+        
+        // Update Call Logs (Direct match)
+        dao.updateCallLogByNumber(number, bestName, result.ownerName, result.companyName, formattedInfo)
+        
+        // Update Lists (Pattern matching)
+        val blackMatch = dao.findBlacklistMatch(number)
+        if (blackMatch != null) {
+            dao.updateBlacklistLabelByNumber(blackMatch.pattern, bestName)
+        }
+        
+        val whiteMatch = dao.findWhitelistMatch(number)
+        if (whiteMatch != null) {
+            dao.updateWhitelistLabelByNumber(whiteMatch.number, bestName)
         }
     }
 
@@ -431,8 +493,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             try {
                 val normalized = PhoneHelper.normalizeToE164(number)
+                
+                // Duplicate check
+                if (dao.findBlacklistByPattern(normalized) != null) {
+                    _uiEvent.emit(UiEvent.ShowToast("This number is already in your Blacklist!"))
+                    return@launch
+                }
+                if (dao.findWhitelistByNumber(normalized) != null) {
+                    _uiEvent.emit(UiEvent.ShowToast("Conflict: This number is currently in your Whitelist!"))
+                    return@launch
+                }
+
                 dao.insertBlacklistEntry(BlacklistEntry(pattern = normalized, label = label ?: "Manual Block"))
                 logToConsole("LIST", "Added to Blacklist: $normalized", LogLevel.INFO)
+                _uiEvent.emit(UiEvent.ShowToast("Added to Blacklist"))
             } catch (e: Exception) {
                 logToConsole("LIST", "Failed to add to Blacklist: ${e.message}", LogLevel.ERROR)
             }
@@ -467,8 +541,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             try {
                 val normalized = PhoneHelper.normalizeToE164(number)
+                
+                // Duplicate check
+                if (dao.findWhitelistByNumber(normalized) != null) {
+                    _uiEvent.emit(UiEvent.ShowToast("This number is already in your Whitelist!"))
+                    return@launch
+                }
+                if (dao.findBlacklistMatch(normalized) != null) {
+                    _uiEvent.emit(UiEvent.ShowToast("Conflict: This number is currently in your Blacklist!"))
+                    return@launch
+                }
+
                 dao.insertWhitelistEntry(WhitelistEntry(number = normalized, label = label ?: "Allowed Caller"))
                 logToConsole("LIST", "Added to Whitelist: $normalized", LogLevel.INFO)
+                _uiEvent.emit(UiEvent.ShowToast("Added to Whitelist"))
             } catch (e: Exception) {
                 logToConsole("LIST", "Failed to add to Whitelist: ${e.message}", LogLevel.ERROR)
             }
@@ -486,7 +572,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             _bulkProgress.value = 0f
             clearChat()
             val listType = if (isBlacklist) "Blacklist" else "Whitelist"
-            addChatMessage(ChatEntry.UserMessage("🚀 Starting Interactive Bulk Scan for $listType..."))
+            addChatMessage(ChatEntry.UserMessage("🚀 Starting Smart Bulk Scan for $listType..."))
             logToConsole("BULK", "Starting foreground bulk scan for $listType", LogLevel.INFO)
 
             try {
@@ -506,58 +592,58 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     return@launch
                 }
 
-                addChatMessage(ChatEntry.UserMessage("Checking for numbers Gemini hasn't identified yet in your $listType..."))
+                addChatMessage(ChatEntry.UserMessage("Scanning for entries that haven't been verified in the last 30 days..."))
 
                 var processedCount = 0
                 listToIdentify.forEachIndexed { index, entry ->
-                    // Check if cancelled or scope closed
                     if (!isActive) return@forEachIndexed
                     
                     val number = if (entry is BlacklistEntry) entry.pattern else (entry as WhitelistEntry).number
                     
                     _bulkProgress.value = (index + 1).toFloat() / total
-                    _bulkNumber.value = number
 
-                    // Check if Gemini has a cached result for this number
-                    val existingIntel = dao.getLookupResult(number)
-                    val needsUpdate = existingIntel == null || (existingIntel.companyName == null && existingIntel.ownerName == null)
-
-                    if (needsUpdate) {
-                        try {
-                            val result = getLookupService().lookup(setOf(number))
-                            if (result != null) {
+                    try {
+                        // Respect 30-day cache logic in service
+                        val result = getLookupService().lookup(setOf(number), forceRefresh = false)
+                        
+                        if (result != null) {
+                            if (result.isCached) {
+                                // Data is fresh enough (< 30 days) - processed instantly
+                                logToConsole("BULK", "Skipping $number: Data is < 30 days old.", LogLevel.INFO)
+                            } else {
+                                // Fresh from Gemini - show feedback and delay
+                                _bulkNumber.value = number
                                 processedCount++
-                                addChatMessage(ChatEntry.IntelReport(result))
                                 
-                                val bestName = result.companyName ?: result.ownerName ?: "Unknown"
-                                if (bestName != "Unknown") {
-                                    val formattedInfo = buildString {
-                                        append("Risk: ${if (result.scam) "HIGH" else if (result.spam) "MEDIUM" else "LOW"} • ")
-                                        append("Acc: ${(result.confidence?.times(100))?.toInt()}% • ")
-                                        append(result.summary?.take(60))
-                                    }
-                                    if (isBlacklist) dao.updateBlacklistLabelByNumber(number, bestName)
-                                    else dao.updateWhitelistLabelByNumber(number, bestName)
-                                    dao.updateCallLogByNumber(number, bestName, formattedInfo)
+                                // Get current info for comparison
+                                val existingIntel = dao.getLookupResult(number)
+                                val newConfidence = result.confidence ?: 0.0
+                                val oldConfidence = existingIntel?.confidence ?: -1.0
+
+                                if (newConfidence > oldConfidence) {
+                                    applyInvestigationResult(number, result)
+                                    addChatMessage(ChatEntry.IntelReport(result, wasAutoApplied = true, oldConfidence = oldConfidence))
+                                    logToConsole("BULK", "Auto-updated $number (Better confidence)", LogLevel.INFO)
+                                } else {
+                                    addChatMessage(ChatEntry.IntelReport(result, wasAutoApplied = false, oldConfidence = oldConfidence))
                                 }
+                                
+                                // Rate limit protection - only delay if we actually made a network request
+                                delay(2000)
                             }
-                        } catch (e: Exception) {
-                            val errorMsg = e.message ?: "Unknown error"
-                            addChatMessage(ChatEntry.ErrorMessage("Failed on $number: $errorMsg"))
-                            logToConsole("BULK", "Error processing $number: $errorMsg", LogLevel.ERROR)
-                            
-                            // If it's a critical error (like API Key invalid), abort
-                            if (errorMsg.contains("API key", ignoreCase = true)) return@launch
                         }
-                        // Rate limit protection
-                        if (index < total - 1) kotlinx.coroutines.delay(2000)
-                    } else {
-                        logToConsole("BULK", "Skipping $number: Already has Gemini intelligence", LogLevel.INFO)
+                    } catch (e: Exception) {
+                        logToConsole("BULK", "Failed on $number: ${e.message}", LogLevel.ERROR)
                     }
                 }
                 
-                addChatMessage(ChatEntry.UserMessage("✅ Bulk scan complete. Processed $processedCount items."))
-                logToConsole("BULK", "Foreground bulk scan finished. Total processed: $processedCount", LogLevel.INFO)
+                if (processedCount == 0) {
+                    addChatMessage(ChatEntry.UserMessage("ℹ️ All numbers in this list are already up-to-date (recently verified)."))
+                    addChatMessage(ChatEntry.UserMessage("💡 If you want to force a live refresh of every number now, please use the 'Run Now' maintenance button in Settings."))
+                } else {
+                    addChatMessage(ChatEntry.UserMessage("✅ Bulk scan complete. Found $processedCount updates."))
+                }
+                logToConsole("BULK", "Foreground bulk scan finished. Total updates: $processedCount", LogLevel.INFO)
 
             } catch (e: Exception) {
                 val errorMsg = e.message ?: "Unknown error"
@@ -658,39 +744,61 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun updateFullNumberDetails(number: String, intel: PhoneLookupResult, isBlacklist: Boolean?) {
+    fun updateFullNumberDetails(oldNumber: String, intel: PhoneLookupResult, isBlacklist: Boolean?) {
         viewModelScope.launch {
             try {
-                // 1. Update Cache
-                dao.insertLookupResult(intel.copy(phoneNumber = number, lookupDate = System.currentTimeMillis()))
+                val newNumber = intel.phoneNumber
                 
-                // 2. Update List Label (if number exists in either)
+                // 1. Handle Primary Key change if number was edited
+                if (oldNumber != newNumber) {
+                    logToConsole("SYSTEM", "Updating number from $oldNumber to $newNumber", LogLevel.INFO)
+                    
+                    // Remove old records
+                    dao.deleteLookupResult(oldNumber)
+                    dao.deleteBlacklistByPattern(oldNumber)
+                    dao.deleteWhitelistByNumber(oldNumber)
+                    // (History is kept as is for historical accuracy, or we could update it too)
+                }
+
+                // 2. Update/Insert Cache
+                dao.insertLookupResult(intel.copy(lookupDate = System.currentTimeMillis()))
+                
+                // 3. Update List Label (if number exists in either)
                 val bestName = intel.companyName ?: intel.ownerName ?: "Unknown"
                 
                 if (isBlacklist == true) {
-                    dao.updateBlacklistLabelByNumber(number, bestName)
+                    dao.insertBlacklistEntry(BlacklistEntry(pattern = newNumber, label = bestName))
                 } else if (isBlacklist == false) {
-                    dao.updateWhitelistLabelByNumber(number, bestName)
+                    dao.insertWhitelistEntry(WhitelistEntry(number = newNumber, label = bestName))
                 } else {
-                    // Try both if we don't know
-                    dao.updateBlacklistLabelByNumber(number, bestName)
-                    dao.updateWhitelistLabelByNumber(number, bestName)
+                    // Try to preserve existing list membership if it was edited from history
+                    if (dao.findBlacklistByPattern(oldNumber) != null || dao.findBlacklistByPattern(newNumber) != null) {
+                        dao.insertBlacklistEntry(BlacklistEntry(pattern = newNumber, label = bestName))
+                    }
+                    if (dao.findWhitelistByNumber(oldNumber) != null || dao.findWhitelistByNumber(newNumber) != null) {
+                        dao.insertWhitelistEntry(WhitelistEntry(number = newNumber, label = bestName))
+                    }
                 }
                 
-                // 3. Update Call Log
+                // 4. Update Call Log
                 val formattedInfo = buildString {
                     append("Risk: ${if (intel.scam) "HIGH" else if (intel.spam) "MEDIUM" else "LOW"} • ")
                     append("Acc: ${(intel.confidence?.times(100))?.toInt()}% • ")
                     append(intel.summary?.take(60))
                 }
-                dao.updateCallLogByNumber(number, bestName, formattedInfo)
+                dao.updateCallLogByNumber(newNumber, bestName, intel.ownerName, intel.companyName, formattedInfo)
+                if (oldNumber != newNumber) {
+                    // Also update any history that was strictly under the old number
+                    dao.updateCallLogByNumber(oldNumber, bestName, intel.ownerName, intel.companyName, formattedInfo)
+                }
                 
-                // 4. Update UI state if this was the selected number
-                if (_selectedNumberIntel.value?.phoneNumber == number) {
+                // 5. Update UI state if this was the selected number
+                if (_selectedNumberIntel.value?.phoneNumber == oldNumber) {
                     _selectedNumberIntel.value = intel
                 }
                 
-                logToConsole("SYSTEM", "Manually updated intelligence for $number", LogLevel.INFO)
+                logToConsole("SYSTEM", "Manually updated details for $newNumber", LogLevel.INFO)
+                _uiEvent.emit(UiEvent.ShowToast("Changes saved"))
             } catch (e: Exception) {
                 logToConsole("SYSTEM", "Failed to update details: ${e.message}", LogLevel.ERROR)
             }
@@ -820,6 +928,29 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun getFullBackupData(onComplete: (String) -> Unit) {
+        viewModelScope.launch {
+            try {
+                logToConsole("BACKUP", "Generating full system backup...", LogLevel.INFO)
+                val container = BackupContainer(
+                    blacklist = dao.getBlacklistSync(),
+                    whitelist = dao.getWhitelistSync(),
+                    callLogs = dao.getAllCallLogsSync(),
+                    blockedCalls = dao.getAllBlockedCallsSync(),
+                    areaCodeBlocks = dao.getAreaCodeBlocksSync(),
+                    prefixBlocks = dao.getPrefixBlocksSync(),
+                    lookupCache = dao.getAllLookupResultsSync(),
+                    geminiApiKey = CryptoManager.getGeminiApiKey(getApplication())
+                )
+                val json = Gson().toJson(container)
+                onComplete(json)
+                logToConsole("BACKUP", "Backup ready for export", LogLevel.INFO)
+            } catch (e: Exception) {
+                logToConsole("BACKUP", "Failed to generate backup: ${e.message}", LogLevel.ERROR)
+            }
+        }
+    }
+
     fun getExportData(isBlacklist: Boolean, onComplete: (String) -> Unit) {
         viewModelScope.launch {
             try {
@@ -838,16 +969,53 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun importNumbers(uri: Uri, toBlacklist: Boolean, onComplete: () -> Unit) {
         viewModelScope.launch {
             try {
-                logToConsole("IMPORT", "Starting import from URI", LogLevel.INFO)
+                logToConsole("IMPORT", "Checking file format...", LogLevel.INFO)
                 getApplication<Application>().contentResolver.openInputStream(uri)?.use { stream ->
                     val text = Scanner(stream).useDelimiter("\\A").next()
-                    handleBulkProcessing(text, toBlacklist)
+                    
+                    if (text.trim().startsWith("{") && text.contains("lookupCache")) {
+                        // This looks like a full backup
+                        handleFullBackupRestore(text)
+                    } else {
+                        // Standard text list import
+                        handleBulkProcessing(text, toBlacklist)
+                    }
                 }
                 logToConsole("IMPORT", "Successfully processed import", LogLevel.INFO)
             } catch (e: Exception) {
                 logToConsole("IMPORT", "Import failed: ${e.message}", LogLevel.ERROR)
             }
             onComplete()
+        }
+    }
+
+    private suspend fun handleFullBackupRestore(json: String) {
+        try {
+            logToConsole("RESTORE", "Parsing backup container...", LogLevel.INFO)
+            val container = Gson().fromJson(json, BackupContainer::class.java)
+            
+            logToConsole("RESTORE", "Restoring tables...", LogLevel.INFO)
+            
+            container.blacklist.forEach { entry -> dao.insertBlacklistEntry(entry) }
+            container.whitelist.forEach { entry -> dao.insertWhitelistEntry(entry) }
+            container.callLogs.forEach { entry -> dao.insertCallLogEntry(entry) }
+            container.blockedCalls.forEach { entry -> dao.insertBlockedCall(entry) }
+            container.areaCodeBlocks.forEach { entry -> dao.insertAreaCodeBlock(entry) }
+            container.prefixBlocks.forEach { entry -> dao.insertPrefixBlock(entry) }
+            container.lookupCache.forEach { entry -> dao.insertLookupResult(entry) }
+            
+            container.geminiApiKey?.let { key ->
+                if (key.isNotBlank()) {
+                    CryptoManager.saveGeminiApiKey(getApplication(), key)
+                    testGeminiKey()
+                    refreshGeminiModels()
+                }
+            }
+            
+            logToConsole("RESTORE", "Restore complete. Restored ${container.callLogs.size} logs and ${container.blacklist.size + container.whitelist.size} numbers.", LogLevel.INFO)
+        } catch (e: Exception) {
+            logToConsole("RESTORE", "Restore failed: ${e.message}", LogLevel.ERROR)
+            throw e
         }
     }
 

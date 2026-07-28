@@ -35,7 +35,7 @@ class SettingsRepository(private val context: Context) {
             blockNonArkansas = preferences[PreferencesKeys.BLOCK_NON_ARKANSAS] ?: false,
             blockInternational = preferences[PreferencesKeys.BLOCK_INTERNATIONAL] ?: false,
             firstRunSyncComplete = preferences[PreferencesKeys.FIRST_RUN_SYNC_COMPLETE] ?: false,
-            enabledDictionaries = preferences[PreferencesKeys.ENABLED_DICTIONARIES] ?: emptySet(),
+            enabledDictionaries = preferences[PreferencesKeys.ENABLED_DICTIONARIES] ?: setOf("global"),
             showContactsInHistory = preferences[PreferencesKeys.SHOW_CONTACTS_IN_HISTORY] ?: false,
             lastSyncTime = preferences[PreferencesKeys.LAST_SYNC_TIME] ?: 0L,
             lastMaintenanceTime = preferences[PreferencesKeys.LAST_MAINTENANCE_TIME] ?: 0L,

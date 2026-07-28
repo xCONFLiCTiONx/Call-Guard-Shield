@@ -42,6 +42,28 @@ fun SettingsScreen(viewModel: MainViewModel) {
     val lifecycleOwner = LocalLifecycleOwner.current
     
     var showLocationRationale by remember { mutableStateOf(false) }
+    var exportData by remember { mutableStateOf("") }
+
+    val fileSaver = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/octet-stream")
+    ) { uri ->
+        uri?.let {
+            context.contentResolver.openOutputStream(it)?.use { stream ->
+                stream.write(exportData.toByteArray())
+                Toast.makeText(context, "Backup saved!", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    val filePicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.GetContent()
+    ) { uri ->
+        uri?.let {
+            viewModel.importNumbers(it, true) {
+                Toast.makeText(context, "Restore complete!", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
 
     val backgroundLocationLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -197,6 +219,48 @@ fun SettingsScreen(viewModel: MainViewModel) {
                         Text("Refresh models to see latest available.", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
                         IconButton(onClick = { viewModel.refreshGeminiModels() }) {
                             Icon(Icons.Default.Refresh, contentDescription = "Refresh", modifier = Modifier.size(20.dp))
+                        }
+                    }
+                }
+            }
+        }
+
+        item {
+            Text(
+                "Full System Backup",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold
+            )
+        }
+
+        item {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text("Backup & Restore", style = MaterialTheme.typography.bodyLarge)
+                    Text("Save all lists, history, and AI intelligence to a .bak file.", style = MaterialTheme.typography.bodySmall)
+                    
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Button(
+                            onClick = { 
+                                viewModel.getFullBackupData { data ->
+                                    exportData = data
+                                    fileSaver.launch("Call_Guard_Shield.bak")
+                                }
+                            },
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text("Create Backup")
+                        }
+                        OutlinedButton(
+                            onClick = { filePicker.launch("*/*") },
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text("Restore")
                         }
                     }
                 }

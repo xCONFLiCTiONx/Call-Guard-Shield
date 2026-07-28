@@ -69,7 +69,7 @@ class CallGuardShieldService : CallScreeningService() {
                                         append("Acc: ${(it.confidence?.times(100))?.toInt()}% • ")
                                         append(it.summary?.take(60))
                                     }
-                                    dao.updateCallLogDetailed(entryId, bestName, formattedInfo)
+                                    dao.updateCallLogDetailed(entryId, bestName, it.ownerName, it.companyName, formattedInfo)
                                 }
                             }
                         } catch (e: Exception) {

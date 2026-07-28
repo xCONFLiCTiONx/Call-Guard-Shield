@@ -13,5 +13,7 @@ data class CallLogEntry(
     val isContact: Boolean,
     val callerId: String? = null, // System provided name
     val callerName: String? = null, // Gemini or Contact verified name
+    val ownerName: String? = null, // Extracted Person Name
+    val companyName: String? = null, // Extracted Business Name
     val callerInfo: String? = null // Gemini reputation report
 )

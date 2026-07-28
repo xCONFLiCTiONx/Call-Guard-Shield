@@ -68,6 +68,19 @@ class MainActivity : ComponentActivity() {
 fun MainApp() {
     val navController = rememberNavController()
     val viewModel: MainViewModel = viewModel()
+    val context = LocalContext.current
+    
+    // Global UI Event Observer
+    LaunchedEffect(Unit) {
+        viewModel.uiEvent.collect { event ->
+            when (event) {
+                is com.xconflictionx.callguardshield.ui.UiEvent.ShowToast -> {
+                    android.widget.Toast.makeText(context, event.message, android.widget.Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
+
     var selectedItem by remember { mutableIntStateOf(0) }
     val items = listOf("Home", "History", "Lists", "Chat", "Settings")
     val icons = listOf(

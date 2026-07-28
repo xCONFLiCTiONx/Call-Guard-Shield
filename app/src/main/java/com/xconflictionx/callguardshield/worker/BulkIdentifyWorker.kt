@@ -54,24 +54,22 @@ class BulkIdentifyWorker(
 
                 // Update Progress for UI
                 val progress = (index + 1).toFloat() / listToIdentify.size
-                setProgress(workDataOf("progress" to progress, "number" to number))
+                setProgress(workDataOf("progress" to progress)) // Don't set number yet
 
-                // Maintenance mode refreshes EVERY number (lookup service handles 30-day logic internally if forceRefresh=false)
-                // If not maintenance, we only process numbers Gemini hasn't updated yet.
-                val existingIntel = dao.getLookupResult(number)
-                val needsUpdate = isMaintenance || existingIntel == null || (existingIntel.companyName == null && existingIntel.ownerName == null)
-
-                if (needsUpdate) {
-                    try {
-                        Log.d("BULK_WORKER", "Identifying: $number")
-                        // Maintenance mode doesn't force a refresh, so Gemini service will 
-                        // automatically use cache if it's < 30 days old.
-                        val result = service.lookup(setOf(number), forceRefresh = false)
-                        if (result != null) {
+                try {
+                    // Respect 30-day cache logic in service (forceRefresh=false)
+                    // This will hit Gemini if data is > 30 days old OR if info is missing (Unknown)
+                    val result = service.lookup(setOf(number), forceRefresh = false)
+                    
+                    if (result != null) {
+                        if (result.isCached) {
+                            Log.d("BULK_WORKER", "Skipping $number (Data is < 30 days old)")
+                        } else {
+                            // Fresh from Gemini
                             processedCount++
-                            val bestName = result.companyName ?: result.ownerName ?: "Unknown"
+                            setProgress(workDataOf("progress" to progress, "number" to number))
                             
-                            // Only update if we found something better than "Unknown"
+                            val bestName = result.companyName ?: result.ownerName ?: "Unknown"
                             if (bestName != "Unknown") {
                                 val formattedInfo = buildString {
                                     append("Risk: ${if (result.scam) "HIGH" else if (result.spam) "MEDIUM" else "LOW"} • ")
@@ -82,20 +80,16 @@ class BulkIdentifyWorker(
                                 if (isBlacklist) dao.updateBlacklistLabelByNumber(number, bestName)
                                 else dao.updateWhitelistLabelByNumber(number, bestName)
                                 
-                                dao.updateCallLogByNumber(number, bestName, formattedInfo)
+                                dao.updateCallLogByNumber(number, bestName, result.ownerName, result.companyName, formattedInfo)
                                 Log.i("BULK_WORKER", "Updated $number to $bestName")
                             }
+                            
+                            // Rate limit protection - only delay if we actually hit the network
+                            delay(2000)
                         }
-                    } catch (e: Exception) {
-                        Log.e("BULK_WORKER", "Failed on $number: ${e.message}")
                     }
-                } else {
-                    Log.d("BULK_WORKER", "Skipping $number (already has Gemini intelligence)")
-                }
-
-                // Rate limit protection - only delay if we actually made a network request
-                if (index < listToIdentify.size - 1 && needsUpdate) {
-                    delay(2000)
+                } catch (e: Exception) {
+                    Log.e("BULK_WORKER", "Failed on $number: ${e.message}")
                 }
             }
             

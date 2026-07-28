@@ -110,16 +110,16 @@ fun ChatScreen(viewModel: MainViewModel) {
         // Progress Bar Section
         if (isIdentifying) {
             Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
-                val progressValue = bulkProgress
-                if (progressValue != null) {
+                val p = bulkProgress
+                if (p != null) {
                     LinearProgressIndicator(
-                        progress = { progressValue },
+                        progress = p,
                         modifier = Modifier.fillMaxWidth(),
                         color = MaterialTheme.colorScheme.primary,
-                        trackColor = MaterialTheme.colorScheme.surfaceVariant,
+                        trackColor = MaterialTheme.colorScheme.surfaceVariant
                     )
                     Text(
-                        text = "Bulk scan progress: ${(progressValue * 100).toInt()}%",
+                        text = "Bulk scan progress: ${(p * 100).toInt()}%",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.padding(top = 4.dp).align(Alignment.CenterHorizontally)
@@ -180,7 +180,14 @@ fun ChatScreen(viewModel: MainViewModel) {
                         is ChatEntry.IntelReport -> {
                             PhoneLookupResultCard(
                                 result = entry.result,
-                                onRefine = { viewModel.refineInvestigation(it) }
+                                wasAutoApplied = entry.wasAutoApplied,
+                                oldConfidence = entry.oldConfidence,
+                                onRefine = { viewModel.refineInvestigation(it) },
+                                onApply = { result ->
+                                    coroutineScope.launch {
+                                        viewModel.applyInvestigationResult(result.phoneNumber, result)
+                                    }
+                                }
                             )
                         }
                         is ChatEntry.ErrorMessage -> ErrorBubble(entry.text) {

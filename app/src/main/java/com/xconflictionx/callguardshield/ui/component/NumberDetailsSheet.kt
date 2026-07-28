@@ -22,7 +22,7 @@ fun NumberDetailsSheet(
     number: String,
     label: String? = null,
     intelResult: PhoneLookupResult? = null,
-    isIdentifying: Boolean = false,
+    isThisNumberIdentifying: Boolean = false,
     onDismiss: () -> Unit,
     onOpenSettings: () -> Unit,
     onIdentify: () -> Unit
@@ -62,7 +62,7 @@ fun NumberDetailsSheet(
                 
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     // Gemini manual scan button or loading indicator
-                    if (isIdentifying) {
+                    if (isThisNumberIdentifying) {
                         CircularProgressIndicator(
                             modifier = Modifier.size(24.dp).padding(4.dp),
                             strokeWidth = 2.dp,

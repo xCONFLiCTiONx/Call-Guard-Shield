@@ -1,6 +1,7 @@
 package com.xconflictionx.callguardshield.worker
 
 import android.content.Context
+import android.util.Log
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import com.xconflictionx.callguardshield.data.AppDatabase
@@ -60,20 +61,25 @@ class SpamSyncWorker(
             // 2. Fetch CallShield Hot Ranges (Optimized Prefixes)
             val rangesJson = fetchUrl("https://raw.githubusercontent.com/SysAdminDoc/CallShield/main/data/hot_ranges.json")
             if (rangesJson != null) {
-                val arr = JSONArray(rangesJson)
-                for (i in 0 until arr.length()) {
-                    val prefix = arr.getString(i)
-                    val normalized = PhoneHelper.normalizeToE164(prefix)
-                    if (normalized.isNotEmpty()) {
-                        dao.insertGlobalSpamEntry(GlobalSpamEntry(pattern = normalized, label = "Verified Robocall Prefix", dictionaryId = "global"))
+                try {
+                    val arr = JSONArray(rangesJson)
+                    for (i in 0 until arr.length()) {
+                        val prefix = arr.getString(i)
+                        val normalized = PhoneHelper.normalizeToE164(prefix)
+                        if (normalized.isNotEmpty()) {
+                            dao.insertGlobalSpamEntry(GlobalSpamEntry(pattern = normalized, label = "Verified Robocall Prefix", dictionaryId = "global"))
+                        }
                     }
+                } catch (e: Exception) {
+                    Log.e("SPAM_SYNC", "Failed to parse hot ranges", e)
                 }
             }
             
+            settingsRepo.updateLastSyncTime(now)
             settingsRepo.setFirstRunSyncComplete(true)
-            settingsRepo.updateLastSyncTime(System.currentTimeMillis())
             Result.success()
         } catch (e: Exception) {
+            Log.e("SPAM_SYNC", "Sync failed", e)
             Result.retry()
         }
     }

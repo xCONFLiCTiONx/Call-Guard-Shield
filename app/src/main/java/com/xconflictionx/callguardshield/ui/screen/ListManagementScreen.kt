@@ -34,6 +34,7 @@ fun ListManagementScreen(viewModel: MainViewModel, onNavigateToChat: () -> Unit)
     val isIdentifying by viewModel.isIdentifying.collectAsState()
     val bulkProgress by viewModel.bulkProgress.collectAsState()
     val bulkNumber by viewModel.bulkNumber.collectAsState()
+    val foregroundNumber by viewModel.foregroundNumber.collectAsState()
     val selectedNumberIntel by viewModel.selectedNumberIntel.collectAsState()
     var tabIndex by remember { mutableIntStateOf(0) }
     val tabs = listOf("Blacklist", "Whitelist")
@@ -77,8 +78,9 @@ fun ListManagementScreen(viewModel: MainViewModel, onNavigateToChat: () -> Unit)
 
         if (isIdentifying) {
             Column(modifier = Modifier.fillMaxWidth()) {
+                val p = bulkProgress ?: 0f
                 LinearProgressIndicator(
-                    progress = { bulkProgress ?: 0f },
+                    progress = p,
                     modifier = Modifier.fillMaxWidth().height(4.dp),
                     color = MaterialTheme.colorScheme.primary,
                     trackColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.2f)
@@ -124,14 +126,12 @@ fun ListManagementScreen(viewModel: MainViewModel, onNavigateToChat: () -> Unit)
                 Spacer(modifier = Modifier.weight(1f))
 
                 IconButton(onClick = {
-                    val isBlacklist = tabIndex == 0
-                    viewModel.getExportData(isBlacklist) { data ->
+                    viewModel.getFullBackupData { data ->
                         exportData = data
-                        val fileName = if (isBlacklist) "blacklist.txt" else "whitelist.txt"
-                        fileSaver.launch(fileName)
+                        fileSaver.launch("Call_Guard_Shield.bak")
                     }
                 }) {
-                    Icon(Icons.Default.FileDownload, contentDescription = "Export")
+                    Icon(Icons.Default.FileDownload, contentDescription = "Full Backup")
                 }
 
                 IconButton(onClick = {
@@ -159,15 +159,22 @@ fun ListManagementScreen(viewModel: MainViewModel, onNavigateToChat: () -> Unit)
             )
         }
 
-        if (showImportDialog && pendingFileUri != null) {
-            ImportTargetDialog(
-                onDismiss = { showImportDialog = false },
-                onSelect = { toBlacklist ->
-                    viewModel.importNumbers(pendingFileUri!!, toBlacklist) { }
+    if (showImportDialog && pendingFileUri != null) {
+        AlertDialog(
+            onDismissRequest = { showImportDialog = false },
+            title = { Text("Import Data") },
+            text = { Text("Would you like to import this as a combined backup, or add to a specific list?") },
+            confirmButton = {
+                Button(onClick = {
+                    viewModel.importNumbers(pendingFileUri!!, true) { }
                     showImportDialog = false
-                }
-            )
-        }
+                }) { Text("Auto-Detect / Backup") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showImportDialog = false }) { Text("Cancel") }
+            }
+        )
+    }
 
         if (showPasteDialog) {
             PasteNumbersDialog(
@@ -180,9 +187,9 @@ fun ListManagementScreen(viewModel: MainViewModel, onNavigateToChat: () -> Unit)
         }
 
         if (tabIndex == 0) {
-            BlacklistTab(viewModel, onNavigateToChat, selectedNumberIntel)
+            BlacklistTab(viewModel, onNavigateToChat, selectedNumberIntel, foregroundNumber)
         } else {
-            WhitelistTab(viewModel, onNavigateToChat, selectedNumberIntel)
+            WhitelistTab(viewModel, onNavigateToChat, selectedNumberIntel, foregroundNumber)
         }
     }
 }
@@ -218,21 +225,6 @@ fun AddSingleNumberDialog(isBlacklist: Boolean, onDismiss: () -> Unit, onConfirm
         },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text("Cancel") }
-        }
-    )
-}
-
-@Composable
-fun ImportTargetDialog(onDismiss: () -> Unit, onSelect: (Boolean) -> Unit) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Import Target") },
-        text = { Text("Choose which list to add these numbers to.") },
-        confirmButton = {
-            Button(onClick = { onSelect(true) }) { Text("Blacklist") }
-        },
-        dismissButton = {
-            TextButton(onClick = { onSelect(false) }) { Text("Whitelist") }
         }
     )
 }
@@ -276,10 +268,10 @@ fun PasteNumbersDialog(onDismiss: () -> Unit, onConfirm: (String, Boolean) -> Un
 fun BlacklistTab(
     viewModel: MainViewModel, 
     onNavigateToChat: () -> Unit,
-    selectedNumberIntel: com.xconflictionx.callguardshield.data.entity.PhoneLookupResult? = null
+    selectedNumberIntel: com.xconflictionx.callguardshield.data.entity.PhoneLookupResult? = null,
+    foregroundNumber: String? = null
 ) {
     val blacklist by viewModel.blacklist.collectAsState()
-    val isIdentifying by viewModel.isIdentifying.collectAsState()
     var selectedItem by remember { mutableStateOf<Triple<String, String?, Boolean>?>(null) } 
     var showSettings by remember { mutableStateOf(false) }
     val context = LocalContext.current
@@ -315,7 +307,7 @@ fun BlacklistTab(
                     number = number,
                     label = label,
                     intelResult = selectedNumberIntel,
-                    isIdentifying = isIdentifying,
+                    isThisNumberIdentifying = foregroundNumber == number,
                     onDismiss = { selectedItem = null },
                     onOpenSettings = { showSettings = true },
                     onIdentify = {
@@ -331,10 +323,7 @@ fun BlacklistTab(
                 NumberActionMenu(
                     number = number,
                     label = label,
-                    onDismiss = { 
-                        showSettings = false
-                        selectedItem = null
-                    },
+                    onDismiss = { showSettings = false },
                     onIdentify = {
                         viewModel.setAutoQuery(number, label)
                         onNavigateToChat()
@@ -360,8 +349,8 @@ fun BlacklistTab(
                     number = number,
                     initialIntel = selectedNumberIntel,
                     onDismiss = { selectedItem = null },
-                    onConfirm = { updatedIntel ->
-                        viewModel.updateFullNumberDetails(number, updatedIntel, true)
+                    onConfirm = { oldNum, updatedIntel ->
+                        viewModel.updateFullNumberDetails(oldNum, updatedIntel, true)
                         selectedItem = null
                     }
                 )
@@ -374,10 +363,10 @@ fun BlacklistTab(
 fun WhitelistTab(
     viewModel: MainViewModel, 
     onNavigateToChat: () -> Unit,
-    selectedNumberIntel: com.xconflictionx.callguardshield.data.entity.PhoneLookupResult? = null
+    selectedNumberIntel: com.xconflictionx.callguardshield.data.entity.PhoneLookupResult? = null,
+    foregroundNumber: String? = null
 ) {
     val whitelist by viewModel.whitelist.collectAsState()
-    val isIdentifying by viewModel.isIdentifying.collectAsState()
     var selectedItem by remember { mutableStateOf<Triple<String, String?, Boolean>?>(null) }
     var showSettings by remember { mutableStateOf(false) }
     val context = LocalContext.current
@@ -413,7 +402,7 @@ fun WhitelistTab(
                     number = number,
                     label = label,
                     intelResult = selectedNumberIntel,
-                    isIdentifying = isIdentifying,
+                    isThisNumberIdentifying = foregroundNumber == number,
                     onDismiss = { selectedItem = null },
                     onOpenSettings = { showSettings = true },
                     onIdentify = {
@@ -429,10 +418,7 @@ fun WhitelistTab(
                 NumberActionMenu(
                     number = number,
                     label = label,
-                    onDismiss = { 
-                        showSettings = false
-                        selectedItem = null
-                    },
+                    onDismiss = { showSettings = false },
                     onIdentify = {
                         viewModel.setAutoQuery(number, label)
                         onNavigateToChat()
@@ -458,8 +444,8 @@ fun WhitelistTab(
                     number = number,
                     initialIntel = selectedNumberIntel,
                     onDismiss = { selectedItem = null },
-                    onConfirm = { updatedIntel ->
-                        viewModel.updateFullNumberDetails(number, updatedIntel, false)
+                    onConfirm = { oldNum, updatedIntel ->
+                        viewModel.updateFullNumberDetails(oldNum, updatedIntel, false)
                         selectedItem = null
                     }
                 )

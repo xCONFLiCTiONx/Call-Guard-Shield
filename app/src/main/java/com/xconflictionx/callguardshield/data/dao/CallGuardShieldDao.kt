@@ -13,6 +13,9 @@ interface CallGuardShieldDao {
     @Query("SELECT * FROM blocked_calls ORDER BY timestamp DESC")
     fun getAllBlockedCalls(): Flow<List<BlockedCall>>
 
+    @Query("SELECT * FROM blocked_calls")
+    suspend fun getAllBlockedCallsSync(): List<BlockedCall>
+
     @Delete
     suspend fun deleteBlockedCall(call: BlockedCall)
 
@@ -118,6 +121,9 @@ interface CallGuardShieldDao {
     @Query("SELECT * FROM call_log ORDER BY timestamp DESC")
     fun getAllCallLogs(): Flow<List<CallLogEntry>>
 
+    @Query("SELECT * FROM call_log")
+    suspend fun getAllCallLogsSync(): List<CallLogEntry>
+
     @Query("DELETE FROM call_log WHERE id = :id")
     suspend fun deleteCallLogById(id: Long)
 
@@ -133,11 +139,11 @@ interface CallGuardShieldDao {
     @Query("UPDATE call_log SET callerInfo = :info WHERE id = :id")
     suspend fun updateCallLogInfo(id: Long, info: String)
 
-    @Query("UPDATE call_log SET callerName = :name, callerInfo = :info WHERE id = :id")
-    suspend fun updateCallLogDetailed(id: Long, name: String, info: String)
+    @Query("UPDATE call_log SET callerName = :name, ownerName = :owner, companyName = :company, callerInfo = :info WHERE id = :id")
+    suspend fun updateCallLogDetailed(id: Long, name: String, owner: String?, company: String?, info: String)
 
-    @Query("UPDATE call_log SET callerName = :name, callerInfo = :info WHERE number = :number")
-    suspend fun updateCallLogByNumber(number: String, name: String, info: String)
+    @Query("UPDATE call_log SET callerName = :name, ownerName = :owner, companyName = :company, callerInfo = :info WHERE number = :number")
+    suspend fun updateCallLogByNumber(number: String, name: String, owner: String?, company: String?, info: String)
 
     @Query("UPDATE blacklist SET label = :label WHERE pattern = :number")
     suspend fun updateBlacklistLabelByNumber(number: String, label: String)
@@ -151,6 +157,12 @@ interface CallGuardShieldDao {
 
     @Query("SELECT * FROM phone_lookup_cache WHERE phoneNumber = :number")
     suspend fun getLookupResult(number: String): PhoneLookupResult?
+
+    @Query("DELETE FROM phone_lookup_cache WHERE phoneNumber = :number")
+    suspend fun deleteLookupResult(number: String)
+
+    @Query("SELECT * FROM phone_lookup_cache")
+    suspend fun getAllLookupResultsSync(): List<PhoneLookupResult>
 
     @Query("DELETE FROM phone_lookup_cache")
     suspend fun clearLookupCache()

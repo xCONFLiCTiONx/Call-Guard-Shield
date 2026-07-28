@@ -34,7 +34,7 @@ import java.util.*
 fun HistoryScreen(viewModel: MainViewModel, onNavigateToChat: () -> Unit) {
     val logs by viewModel.callLogs.collectAsState()
     val selectedNumberIntel by viewModel.selectedNumberIntel.collectAsState()
-    val isIdentifying by viewModel.isIdentifying.collectAsState()
+    val foregroundNumber by viewModel.foregroundNumber.collectAsState()
     val context = LocalContext.current
     var selectedItem by remember { mutableStateOf<Pair<String, String?>?>(null) }
     var showSettings by remember { mutableStateOf(false) }
@@ -108,7 +108,7 @@ fun HistoryScreen(viewModel: MainViewModel, onNavigateToChat: () -> Unit) {
                     number = number,
                     label = label,
                     intelResult = selectedNumberIntel,
-                    isIdentifying = isIdentifying,
+                    isThisNumberIdentifying = foregroundNumber == number,
                     onDismiss = { selectedItem = null },
                     onOpenSettings = { showSettings = true },
                     onIdentify = {
@@ -125,10 +125,7 @@ fun HistoryScreen(viewModel: MainViewModel, onNavigateToChat: () -> Unit) {
                 NumberActionMenu(
                     number = number,
                     label = label,
-                    onDismiss = { 
-                        showSettings = false
-                        selectedItem = null
-                    },
+                    onDismiss = { showSettings = false },
                     onIdentify = {
                         viewModel.setAutoQuery(number, label)
                         onNavigateToChat()
@@ -157,8 +154,8 @@ fun HistoryScreen(viewModel: MainViewModel, onNavigateToChat: () -> Unit) {
                         showDetailsEditor = false
                         selectedItem = null
                     },
-                    onConfirm = { updatedIntel ->
-                        viewModel.updateFullNumberDetails(number, updatedIntel, null)
+                    onConfirm = { oldNum, updatedIntel ->
+                        viewModel.updateFullNumberDetails(oldNum, updatedIntel, null)
                         showDetailsEditor = false
                         selectedItem = null
                     }
@@ -176,6 +173,10 @@ fun CallLogItem(
     val locale = LocalConfiguration.current.locales[0]
     val date = SimpleDateFormat("MMM dd, HH:mm", locale).format(Date(log.timestamp))
     
+    val displayName = log.callerName ?: if (log.isContact) "Verified Contact" else null
+    val headline = log.companyName ?: log.ownerName ?: displayName ?: log.number
+    val showNumberInSub = headline != log.number
+
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -192,41 +193,59 @@ fun CallLogItem(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Column {
+                Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = log.number,
+                        text = headline,
                         style = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurface
+                        color = if (headline == log.number) MaterialTheme.colorScheme.onSurface 
+                                else MaterialTheme.colorScheme.primary
                     )
                     
-                    // Display system-provided Caller ID
-                    if (!log.callerId.isNullOrBlank()) {
+                    if (showNumberInSub) {
                         Text(
-                            text = "Carrier ID: ${log.callerId}",
+                            text = log.number,
                             style = MaterialTheme.typography.bodySmall,
                             color = Color.Gray
                         )
                     }
 
-                    // Display AI or Contact verified identity
-                    val verifiedName = log.callerName ?: if (log.isContact) "Verified Contact" else null
-                    if (!verifiedName.isNullOrBlank()) {
+                    // Multi-line Identity details
+                    if (log.ownerName != null || log.companyName != null) {
+                        Spacer(modifier = Modifier.height(4.dp))
+                        if (log.ownerName != null) {
+                            Text(
+                                text = "Name: ${log.ownerName}",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        if (log.companyName != null) {
+                            Text(
+                                text = "Business: ${log.companyName}",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    } else if (log.isContact) {
                         Text(
-                            text = "Identity: $verifiedName",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = if (log.isContact) Color(0xFF4CAF50) else MaterialTheme.colorScheme.primary,
+                            text = "Verified Contact",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = Color(0xFF4CAF50),
                             fontWeight = FontWeight.Bold
-                        )
-                    } else {
-                        Text(
-                            text = "Identity: Unknown",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = Color.Gray,
-                            fontWeight = FontWeight.Normal
                         )
                     }
 
+                    // Carrier ID
+                    if (!log.callerId.isNullOrBlank() && log.callerId != log.number) {
+                        Text(
+                            text = "Carrier ID: ${log.callerId}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = Color.Gray
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(4.dp))
                     Text(
                         text = date,
                         style = MaterialTheme.typography.bodySmall,
@@ -234,48 +253,65 @@ fun CallLogItem(
                     )
                 }
                 
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    if (log.isBlocked) {
-                        Surface(
-                            color = MaterialTheme.colorScheme.error,
-                            shape = MaterialTheme.shapes.small
-                        ) {
-                            Text(
-                                text = "BLOCKED",
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onError,
-                                fontWeight = FontWeight.Bold
-                            )
+                Column(horizontalAlignment = Alignment.End) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        if (log.isBlocked) {
+                            Surface(
+                                color = MaterialTheme.colorScheme.error,
+                                shape = MaterialTheme.shapes.small
+                            ) {
+                                Text(
+                                    text = "BLOCKED",
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onError,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        } else {
+                            Surface(
+                                color = Color.Green.copy(alpha = 0.2f),
+                                shape = MaterialTheme.shapes.small
+                            ) {
+                                Text(
+                                    text = "ALLOWED",
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = Color.Green,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
                         }
-                    } else {
-                        Surface(
-                            color = Color.Green.copy(alpha = 0.2f),
-                            shape = MaterialTheme.shapes.small
-                        ) {
-                            Text(
-                                text = "ALLOWED",
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = Color.Green,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Icon(Icons.Default.MoreVert, contentDescription = "Menu", tint = Color.Gray)
                     }
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Icon(Icons.Default.MoreVert, contentDescription = "Menu", tint = Color.Gray)
                 }
             }
             
-            if (log.isBlocked) {
+            // Technical Intel Footer (Risk/Accuracy)
+            if (!log.callerInfo.isNullOrBlank()) {
                 Spacer(modifier = Modifier.height(8.dp))
+                Surface(
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+                    shape = MaterialTheme.shapes.extraSmall
+                ) {
+                    Text(
+                        text = log.callerInfo,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
+            if (log.isBlocked && !log.reason.isNullOrBlank()) {
+                Spacer(modifier = Modifier.height(4.dp))
                 Text(
                     text = "Reason: ${log.reason}",
-                    style = MaterialTheme.typography.bodyMedium,
+                    style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.error
                 )
             }
-            
         }
     }
 }

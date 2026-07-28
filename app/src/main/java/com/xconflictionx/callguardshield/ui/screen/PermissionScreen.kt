@@ -84,6 +84,13 @@ fun PermissionScreen(
         val basePermissionsGranted = contactsGranted && locationGranted && phoneStateGranted && smsGranted
         val allGranted = basePermissionsGranted && (roleGranted || !roleAvailable)
 
+        // Auto-trigger Call Screening role request when base permissions are granted
+        LaunchedEffect(basePermissionsGranted, roleGranted) {
+            if (basePermissionsGranted && roleAvailable && !roleGranted) {
+                onRequestRole()
+            }
+        }
+
         Scaffold(
             modifier = Modifier.fillMaxSize(),
             containerColor = Color.Black, // Explicitly black as requested
@@ -165,9 +172,9 @@ fun PermissionScreen(
                 ) {
                     Column(modifier = Modifier.padding(16.dp)) {
                         Text("System Diagnosis", fontWeight = FontWeight.Bold, color = Color.Cyan)
-                        Text("Role Available: ${if (roleAvailable) "YES" else "NO"}", style = MaterialTheme.typography.bodySmall)
-                        Text("Role Held: ${if (roleGranted) "YES" else "NO"}", style = MaterialTheme.typography.bodySmall)
-                        Text("Samsung Model: S23 FE detected", style = MaterialTheme.typography.bodySmall)
+                        Text("Role Available: ${if (roleAvailable) "YES" else "NO"}", style = MaterialTheme.typography.bodySmall, color = Color.LightGray)
+                        Text("Role Held: ${if (roleGranted) "YES" else "NO"}", style = MaterialTheme.typography.bodySmall, color = Color.LightGray)
+                        Text("Samsung Model: S23 FE detected", style = MaterialTheme.typography.bodySmall, color = Color.LightGray)
                     }
                 }
 

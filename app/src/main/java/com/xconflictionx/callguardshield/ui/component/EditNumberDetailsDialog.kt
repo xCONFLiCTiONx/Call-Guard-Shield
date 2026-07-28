@@ -17,8 +17,9 @@ fun EditNumberDetailsDialog(
     number: String,
     initialIntel: PhoneLookupResult?,
     onDismiss: () -> Unit,
-    onConfirm: (PhoneLookupResult) -> Unit
+    onConfirm: (String, PhoneLookupResult) -> Unit
 ) {
+    var currentNumber by remember { mutableStateOf(number) }
     var ownerName by remember { mutableStateOf(initialIntel?.ownerName ?: "") }
     var companyName by remember { mutableStateOf(initialIntel?.companyName ?: "") }
     var category by remember { mutableStateOf(initialIntel?.category ?: "Unknown") }
@@ -44,7 +45,7 @@ fun EditNumberDetailsDialog(
         ) {
             Column(modifier = Modifier.padding(24.dp)) {
                 Text(
-                    text = "Edit Intelligence: $number",
+                    text = "Edit Entry",
                     style = MaterialTheme.typography.headlineSmall,
                     color = MaterialTheme.colorScheme.primary
                 )
@@ -55,6 +56,15 @@ fun EditNumberDetailsDialog(
                     modifier = Modifier.weight(1f).verticalScroll(rememberScrollState()),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
+                    OutlinedTextField(
+                        value = currentNumber,
+                        onValueChange = { currentNumber = it },
+                        label = { Text("Phone Number / Pattern") },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+
                     OutlinedTextField(
                         value = ownerName,
                         onValueChange = { ownerName = it },
@@ -127,7 +137,7 @@ fun EditNumberDetailsDialog(
                     Spacer(modifier = Modifier.width(8.dp))
                     Button(onClick = {
                         val result = PhoneLookupResult(
-                            phoneNumber = number,
+                            phoneNumber = currentNumber,
                             ownerName = ownerName.ifBlank { null },
                             companyName = companyName.ifBlank { null },
                             category = category.ifBlank { "Unknown" },
@@ -142,9 +152,9 @@ fun EditNumberDetailsDialog(
                             lastVerified = "Manual Edit",
                             lookupDate = System.currentTimeMillis()
                         )
-                        onConfirm(result)
+                        onConfirm(number, result) // Pass original number and new data
                     }) {
-                        Text("Save Details")
+                        Text("Save Changes")
                     }
                 }
             }

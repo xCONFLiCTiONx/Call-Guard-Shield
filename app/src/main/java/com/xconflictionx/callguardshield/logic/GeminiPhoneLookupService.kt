@@ -53,6 +53,9 @@ class GeminiPhoneLookupService(
         
         STRICT OUTPUT FORMAT:
         - Return ONLY a single JSON object.
+        - 'ownerName' and 'companyName' MUST contain ONLY the verified names. 
+        - DO NOT include generic info like "Spam Caller", "High Risk", or confidence scores in the name fields.
+        - If the name is unknown, use null.
         - 'evidence' MUST be a list of simple text strings.
         - 'sources' MUST be a list of simple text strings.
         - DO NOT nest objects or complex structures inside lists.
@@ -109,8 +112,9 @@ class GeminiPhoneLookupService(
 
         val result = executeSingleModelRequest(prompt, number)
         
-        // 2. Save to Cache on Success
-        if (result != null) {
+        // 2. Save to Cache on Success (Only if not a manual forced refresh)
+        // If it's a forced refresh, we let the caller (ViewModel) decide whether to update
+        if (result != null && !forceRefresh) {
             try {
                 dao.insertLookupResult(result)
             } catch (e: Exception) {
