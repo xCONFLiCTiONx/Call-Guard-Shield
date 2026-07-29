@@ -19,9 +19,10 @@ object CryptoManager {
                 EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
             )
         } catch (e: Exception) {
-            android.util.Log.e("CRYPTO", "Failed to initialize encrypted prefs", e)
-            // Fallback to plain prefs IF AND ONLY IF we really can't use encryption.
-            // But don't delete the existing file, as it might just be a temporary Keystore lock.
+            android.util.Log.e("CRYPTO", "Encryption failure (tag mismatch or key lost). Falling back to standard storage.", e)
+            // If creation fails due to AEADBadTagException or similar, the old encrypted data is garbage.
+            // We fallback to standard prefs so the app doesn't crash, but we don't delete the old file 
+            // in case it's a temporary system error.
             context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         }
     }

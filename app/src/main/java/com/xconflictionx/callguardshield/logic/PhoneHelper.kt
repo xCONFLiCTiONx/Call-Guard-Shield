@@ -8,6 +8,11 @@ object PhoneHelper {
     fun normalizeToE164(number: String?): String {
         if (number.isNullOrEmpty()) return ""
         
+        // Check if this is an alphanumeric Sender ID (e.g., "GOOGLE", "BANK")
+        if (number.any { it.isLetter() }) {
+            return number.trim()
+        }
+        
         // Remove all non-numeric characters (except +)
         val clean = number.filter { it.isDigit() || it == '+' }
         

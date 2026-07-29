@@ -30,7 +30,7 @@ import com.xconflictionx.callguardshield.data.entity.BlacklistEntry
 import com.xconflictionx.callguardshield.data.entity.WhitelistEntry
 
 @Composable
-fun ListManagementScreen(viewModel: MainViewModel, onNavigateToChat: () -> Unit) {
+fun ListManagementScreen(viewModel: MainViewModel) {
     val isIdentifying by viewModel.isIdentifying.collectAsState()
     val bulkProgress by viewModel.bulkProgress.collectAsState()
     val bulkNumber by viewModel.bulkNumber.collectAsState()
@@ -126,17 +126,7 @@ fun ListManagementScreen(viewModel: MainViewModel, onNavigateToChat: () -> Unit)
                 Spacer(modifier = Modifier.weight(1f))
 
                 IconButton(onClick = {
-                    viewModel.getFullBackupData { data ->
-                        exportData = data
-                        fileSaver.launch("Call_Guard_Shield.bak")
-                    }
-                }) {
-                    Icon(Icons.Default.FileDownload, contentDescription = "Full Backup")
-                }
-
-                IconButton(onClick = {
                     viewModel.performBulkInvestigation(tabIndex == 0)
-                    onNavigateToChat()
                 }) {
                     Icon(
                         Icons.Default.AutoAwesome, 
@@ -187,9 +177,9 @@ fun ListManagementScreen(viewModel: MainViewModel, onNavigateToChat: () -> Unit)
         }
 
         if (tabIndex == 0) {
-            BlacklistTab(viewModel, onNavigateToChat, selectedNumberIntel, foregroundNumber)
+            BlacklistTab(viewModel, selectedNumberIntel, foregroundNumber)
         } else {
-            WhitelistTab(viewModel, onNavigateToChat, selectedNumberIntel, foregroundNumber)
+            WhitelistTab(viewModel, selectedNumberIntel, foregroundNumber)
         }
     }
 }
@@ -267,7 +257,6 @@ fun PasteNumbersDialog(onDismiss: () -> Unit, onConfirm: (String, Boolean) -> Un
 @Composable
 fun BlacklistTab(
     viewModel: MainViewModel, 
-    onNavigateToChat: () -> Unit,
     selectedNumberIntel: com.xconflictionx.callguardshield.data.entity.PhoneLookupResult? = null,
     foregroundNumber: String? = null
 ) {
@@ -304,6 +293,7 @@ fun BlacklistTab(
             if (!showSettings && selectedItem != null && !selectedItem!!.third) {
                 val (number, label, _) = selectedItem!!
                 NumberDetailsSheet(
+                    viewModel = viewModel,
                     number = number,
                     label = label,
                     intelResult = selectedNumberIntel,
@@ -312,7 +302,6 @@ fun BlacklistTab(
                     onOpenSettings = { showSettings = true },
                     onIdentify = {
                         viewModel.performInvestigation(number)
-                        onNavigateToChat()
                     }
                 )
             }
@@ -325,8 +314,7 @@ fun BlacklistTab(
                     label = label,
                     onDismiss = { showSettings = false },
                     onIdentify = {
-                        viewModel.setAutoQuery(number, label)
-                        onNavigateToChat()
+                        viewModel.performInvestigation(number)
                     },
                     onAddToWhitelist = { l -> viewModel.addToWhitelist(number, l) },
                     onAddToBlacklist = { l -> viewModel.addToBlacklist(number, l) },
@@ -350,7 +338,7 @@ fun BlacklistTab(
                     initialIntel = selectedNumberIntel,
                     onDismiss = { selectedItem = null },
                     onConfirm = { oldNum, updatedIntel ->
-                        viewModel.updateFullNumberDetails(oldNum, updatedIntel, true)
+                        viewModel.updateFullNumberDetails(oldNum, updatedIntel, null)
                         selectedItem = null
                     }
                 )
@@ -362,7 +350,6 @@ fun BlacklistTab(
 @Composable
 fun WhitelistTab(
     viewModel: MainViewModel, 
-    onNavigateToChat: () -> Unit,
     selectedNumberIntel: com.xconflictionx.callguardshield.data.entity.PhoneLookupResult? = null,
     foregroundNumber: String? = null
 ) {
@@ -399,6 +386,7 @@ fun WhitelistTab(
             if (!showSettings && selectedItem != null && !selectedItem!!.third) {
                 val (number, label, _) = selectedItem!!
                 NumberDetailsSheet(
+                    viewModel = viewModel,
                     number = number,
                     label = label,
                     intelResult = selectedNumberIntel,
@@ -407,7 +395,6 @@ fun WhitelistTab(
                     onOpenSettings = { showSettings = true },
                     onIdentify = {
                         viewModel.performInvestigation(number)
-                        onNavigateToChat()
                     }
                 )
             }
@@ -420,8 +407,7 @@ fun WhitelistTab(
                     label = label,
                     onDismiss = { showSettings = false },
                     onIdentify = {
-                        viewModel.setAutoQuery(number, label)
-                        onNavigateToChat()
+                        viewModel.performInvestigation(number)
                     },
                     onAddToWhitelist = { l -> viewModel.addToWhitelist(number, l) },
                     onAddToBlacklist = { l -> viewModel.addToBlacklist(number, l) },
@@ -445,7 +431,7 @@ fun WhitelistTab(
                     initialIntel = selectedNumberIntel,
                     onDismiss = { selectedItem = null },
                     onConfirm = { oldNum, updatedIntel ->
-                        viewModel.updateFullNumberDetails(oldNum, updatedIntel, false)
+                        viewModel.updateFullNumberDetails(oldNum, updatedIntel, null)
                         selectedItem = null
                     }
                 )

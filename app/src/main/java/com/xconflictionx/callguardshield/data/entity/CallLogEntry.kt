@@ -5,7 +5,7 @@ import androidx.room.PrimaryKey
 
 @Entity(tableName = "call_log")
 data class CallLogEntry(
-    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    @PrimaryKey(autoGenerate = true) val id: Long = 0L,
     val number: String,
     val timestamp: Long = System.currentTimeMillis(),
     val isBlocked: Boolean,

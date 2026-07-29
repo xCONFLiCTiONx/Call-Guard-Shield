@@ -54,18 +54,26 @@ class CallGuardShieldService : CallScreeningService() {
                             
                             aiResult?.let { intel ->
                                 val confidence = intel.confidence ?: 0.0
-                                val isHighConfidence = confidence >= 0.9
+                                val requiredConfidence = settings.aiBlockingConfidence / 100.0
+                                val isHighConfidence = confidence >= requiredConfidence
                                 
-                                val shouldAiBlock = isHighConfidence && (
-                                    intel.scam || 
-                                    intel.spam || 
-                                    (settings.blockDebtCollectors && intel.debtCollector) ||
-                                    (settings.blockTelemarketers && intel.telemarketer)
-                                )
+                                val isScamOrSpam = intel.scam || intel.spam
+                                val isDebtCollectorMatch = settings.blockDebtCollectors && intel.debtCollector
+                                val isTelemarketerMatch = settings.blockTelemarketers && intel.telemarketer
+                                
+                                val shouldAiBlock = isHighConfidence && (isScamOrSpam || isDebtCollectorMatch || isTelemarketerMatch)
                                 
                                 if (shouldAiBlock) {
                                     isBlocked = true
                                     reason = "AI: ${intel.category ?: "High Risk"} (${(confidence * 100).toInt()}%)"
+                                } else if (isHighConfidence) {
+                                    // It matched a risk category, but the specific shield is disabled
+                                    if (intel.debtCollector) {
+                                        Log.i("SERVICE_AI", "Detected Debt Collector but block setting is OFF")
+                                    }
+                                    if (intel.telemarketer) {
+                                        Log.i("SERVICE_AI", "Detected Telemarketer but block setting is OFF")
+                                    }
                                 }
                             }
                         }

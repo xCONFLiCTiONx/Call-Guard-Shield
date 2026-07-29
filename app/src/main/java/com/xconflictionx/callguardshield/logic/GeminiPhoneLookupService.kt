@@ -1,14 +1,13 @@
 package com.xconflictionx.callguardshield.logic
 
 import android.content.Context
-import android.util.Log
 import com.google.gson.Gson
 import com.xconflictionx.callguardshield.data.entity.PhoneLookupResult
+import com.xconflictionx.callguardshield.ui.LogLevel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
-import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.HttpException
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
@@ -21,7 +20,62 @@ class GeminiPhoneLookupService(
     private val modelName: String,
     private val dao: com.xconflictionx.callguardshield.data.dao.CallGuardShieldDao
 ) {
-    private val TAG = "GEMINI_LOG"
+    companion object {
+        suspend fun testApiKey(apiKey: String): Boolean {
+            val helloSuccess = try {
+                val service = createApiService()
+                val url = "https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=$apiKey"
+                val request = GeminiRequest(
+                    contents = listOf(GeminiContent(parts = listOf(GeminiPart(text = "Hello"))))
+                )
+                service.generateContent(url, request)
+                true
+            } catch (e: Exception) {
+                false
+            }
+
+            if (helloSuccess) {
+                return true
+            }
+
+            return try {
+                val service = createApiService()
+                val modelResponse = service.listModels(apiKey)
+                val availableModels = modelResponse.models?.map { it.name.removePrefix("models/") } ?: emptyList()
+                availableModels.isNotEmpty()
+            } catch (e: Exception) {
+                false
+            }
+        }
+
+        suspend fun fetchAvailableModels(apiKey: String): List<String> {
+            return try {
+                val service = createApiService()
+                val response = service.listModels(apiKey)
+                val models = response.models?.map { it.name.removePrefix("models/") } ?: emptyList()
+                
+                models.filter { it.contains("flash") || it.contains("pro") }
+                    .filter { !it.contains("vision") && !it.contains("experimental") }
+                    .sortedByDescending { it.contains("flash") }
+            } catch (e: Exception) {
+                emptyList()
+            }
+        }
+
+        private fun createApiService(): GeminiApiService {
+            val client = OkHttpClient.Builder()
+                .connectTimeout(10, TimeUnit.SECONDS)
+                .readTimeout(10, TimeUnit.SECONDS)
+                .build()
+
+            return Retrofit.Builder()
+                .baseUrl("https://generativelanguage.googleapis.com/")
+                .client(client)
+                .addConverterFactory(GsonConverterFactory.create())
+                .build()
+                .create(GeminiApiService::class.java)
+        }
+    }
 
     private interface GeminiApiService {
         @POST
@@ -29,12 +83,15 @@ class GeminiPhoneLookupService(
             @Url url: String,
             @Body request: GeminiRequest
         ): GeminiResponse
+
+        @GET("v1/models")
+        suspend fun listModels(
+            @Query("key") apiKey: String
+        ): GeminiModelListResponse
     }
 
     private val api: GeminiApiService by lazy {
-        val logger = HttpLoggingInterceptor().apply { level = HttpLoggingInterceptor.Level.BODY }
         val client = OkHttpClient.Builder()
-            .addInterceptor(logger)
             .connectTimeout(60, TimeUnit.SECONDS)
             .readTimeout(60, TimeUnit.SECONDS)
             .build()
@@ -54,164 +111,131 @@ class GeminiPhoneLookupService(
         STRICT OUTPUT FORMAT:
         - Return ONLY a single JSON object.
         - 'ownerName' and 'companyName' MUST contain ONLY the verified names. 
-        - DO NOT include generic info like "Spam Caller", "High Risk", or confidence scores in the name fields.
-        - If the name is unknown, use null.
+        - If unknown, use null.
         - 'evidence' MUST be a list of simple text strings.
         - 'sources' MUST be a list of simple text strings.
-        - DO NOT nest objects or complex structures inside lists.
-        
-        TRUST RANKING (Priority):
-        1. Official Organization Websites (.gov, .org, verified business domains).
-        2. Telecom Carrier/ANAC announcement data (identify if it's a test line).
-        3. Established Business Directories.
-        4. User reports and spam databases (800notes, TrueCaller).
-        
-        CRITICAL IDENTIFICATION RULES:
-        - Prioritize identifying Public Entities: Government offices (City Hall, Police), Schools, and Hospitals.
-        - If sources disagree, do NOT guess. Mark identity as "Unverified" and explain the conflict.
-        - ANOMALY: 800-444-4444 is an ANAC test line. If you see it associated with a bank, report the conflict but identify it as a test line.
-        
-        CONFIDENCE MAPPING:
-        0.9-1.0: Verified on official website.
-        0.6-0.8: Multiple independent sources agree.
-        0.1-0.5: Conflicting or low-trust sources.
     """.trimIndent()
 
     suspend fun lookup(phoneNumberVariations: Set<String>, forceRefresh: Boolean = false): PhoneLookupResult? = withContext(Dispatchers.IO) {
         val number = phoneNumberVariations.first()
         
-        // 1. Check Cache First (Unless forced)
         if (!forceRefresh) {
-            try {
-                val cached = dao.getLookupResult(number)
-                if (cached != null) {
-                    val age = System.currentTimeMillis() - cached.lookupDate
-                    val thirtyDays = 30L * 24 * 60 * 60 * 1000
-                    if (age < thirtyDays) {
-                        Log.d(TAG, "Using cached result for $number")
-                        return@withContext cached.copy(isCached = true)
-                    }
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "Cache read failed: ${e.message}")
-            }
-        } else {
-            Log.i(TAG, "Forced refresh requested for $number")
-        }
-
-        val region = PhoneHelper.getRegionForNumber(number) ?: "USA"
-        
-        val prompt = """
-            Task: Investigate reputation and identity for: $number ($region).
-            Targets: Check public directories, spam databases (800notes, who-called), and official brand sites.
-            
-            Output: Return a JSON object with these fields:
-            ownerName (string), companyName (string), category (string), confidence (0.0 to 1.0), summary (string), spam (bool), scam (bool), evidence (list of strings), sources (list of strings).
-            Note: Ensure 'summary' explains your verification logic.
-        """.trimIndent()
-
-        val result = executeSingleModelRequest(prompt, number)
-        
-        // 2. Save to Cache on Success (Only if not a manual forced refresh)
-        // If it's a forced refresh, we let the caller (ViewModel) decide whether to update
-        if (result != null && !forceRefresh) {
-            try {
-                dao.insertLookupResult(result)
-            } catch (e: Exception) {
-                Log.e(TAG, "Failed to save cache: ${e.message}")
+            val cached = dao.getLookupResult(number)
+            if (cached != null) {
+                val age = System.currentTimeMillis() - cached.lookupDate
+                if (age < 30L * 24 * 60 * 60 * 1000) return@withContext cached.copy(isCached = true)
             }
         }
+
+        // Fast Scan (No search) -> Deep Scan (Search) fallback for default lookup
+        StatusManager.setGeminiStage("Fast Scan (High Speed)")
+        val prompt = "Identify identity/reputation for: $number. Output JSON: ownerName, companyName, category, confidence (0-1), summary, spam (bool), scam (bool), evidence (list), sources (list)."
         
+        var result = executeSingleModelRequest(prompt, number, searchMode = false)
+        
+        if (result == null || (result.confidence ?: 0.0) < 0.85) {
+            StatusManager.setGeminiStage("Deep Scan (Web Research)")
+            result = executeSingleModelRequest(prompt, number, searchMode = true)
+        }
+        
+        if (result != null && !forceRefresh) dao.insertLookupResult(result)
         return@withContext result
     }
 
+    suspend fun lookupFast(number: String): PhoneLookupResult? = withContext(Dispatchers.IO) {
+        StatusManager.setGeminiStage("Fast Scan (High Speed)")
+        val prompt = "Identify identity/reputation for: $number. Output JSON: ownerName, companyName, category, confidence (0-1), summary, spam (bool), scam (bool), evidence (list), sources (list)."
+        val result = executeSingleModelRequest(prompt, number, searchMode = false)
+        if (result != null) dao.insertLookupResult(result)
+        result
+    }
+
     suspend fun lookupDeep(number: String): PhoneLookupResult? = withContext(Dispatchers.IO) {
-        val region = PhoneHelper.getRegionForNumber(number) ?: "USA"
-        
-        val prompt = """
-            CRITICAL DEEP VERIFICATION: $number ($region).
-            The previous scan might be wrong. 
-            Perform an exhaustive search: Cross-reference WhitePages, 800-notes, and official state/local directories.
-            Provide a definitive identification if possible, or a detailed conflict report.
-            
-            Output: Return JSON including 'evidence' (list of strings) and a 'summary' (string) of why this identification is reliable.
-        """.trimIndent()
-
-        executeSingleModelRequest(prompt, number)
+        StatusManager.setGeminiStage("Deep Scan (Web Research)")
+        val prompt = "CRITICAL DEEP SEARCH: $number. Output JSON: ownerName, companyName, category, confidence, summary, spam, scam, evidence, sources."
+        executeSingleModelRequest(prompt, number, searchMode = true)
     }
 
-    /**
-     * Optimized for speed (Real-time screening).
-     * Bypasses search tool if necessary or uses a strict timeout.
-     */
-    suspend fun lookupRealTime(number: String): PhoneLookupResult? = withContext(Dispatchers.IO) {
-        // First check cache, always (fastest)
-        try {
-            val cached = dao.getLookupResult(number)
-            if (cached != null) return@withContext cached.copy(isCached = true)
-        } catch (e: Exception) { }
-
-        val prompt = "Real-time Identify: $number. Output JSON (ownerName, companyName, confidence, summary, spam, scam, debtCollector, telemarketer)."
+    suspend fun lookupThorough(number: String): PhoneLookupResult? = withContext(Dispatchers.IO) {
+        val results = mutableListOf<PhoneLookupResult>()
+        val prompt = "THOROUGH INVESTIGATION: $number. Output JSON: ownerName, companyName, category, confidence, summary, spam, scam, evidence, sources."
         
-        try {
-            // Real-time screening uses speed-optimized request (no search grounding by default)
-            executeSingleModelRequest(prompt, number, searchMode = false)
-        } catch (e: Exception) {
-            null
+        repeat(3) { i ->
+            StatusManager.setGeminiStage("Thorough Scan (Stage ${i + 1}/3)")
+            executeSingleModelRequest(prompt, number, searchMode = true)?.let { results.add(it) }
+            if (i < 2) delay(1000) // Small breather between heavy deep scans
         }
+        
+        if (results.isEmpty()) return@withContext null
+        
+        // Pick the one with highest confidence
+        val best = results.maxByOrNull { it.confidence ?: 0.0 }
+        if (best != null) {
+            dao.insertLookupResult(best)
+        }
+        best
     }
 
-    private suspend fun executeSingleModelRequest(prompt: String, number: String, searchMode: Boolean? = null): PhoneLookupResult? {
-        val target = if (modelName.isBlank()) "gemini-flash-latest" else modelName
-        val url = "https://generativelanguage.googleapis.com/v1beta/models/$target:generateContent?key=$apiKey"
+    suspend fun lookupRealTime(number: String): PhoneLookupResult? = withContext(Dispatchers.IO) {
+        val cached = dao.getLookupResult(number)
+        if (cached != null) return@withContext cached.copy(isCached = true)
         
-        val searchModes = if (searchMode != null) listOf(searchMode) else listOf(true, false)
-        var lastError: Exception? = null
+        val prompt = "Real-time Identify: $number. Output JSON (ownerName, companyName, confidence, summary, spam, scam, debtCollector, telemarketer)."
+        executeSingleModelRequest(prompt, number, searchMode = false)
+    }
 
-        for (useSearch in searchModes) {
+    private suspend fun executeSingleModelRequest(prompt: String, number: String, searchMode: Boolean): PhoneLookupResult? {
+        val cleanModelName = modelName.removePrefix("models/").ifBlank { "gemini-3.1-flash-lite" }
+        val versions = listOf("v1", "v1beta")
+
+        for (version in versions) {
+            val url = "https://generativelanguage.googleapis.com/$version/models/$cleanModelName:generateContent?key=$apiKey"
+            val request = GeminiRequest(
+                contents = listOf(GeminiContent(parts = listOf(GeminiPart(text = prompt)))),
+                systemInstruction = GeminiContent(parts = listOf(GeminiPart(text = systemInstructionText))),
+                tools = if (searchMode) listOf(GeminiTool(googleSearchRetrieval = emptyMap())) else null,
+                generationConfig = GeminiGenerationConfig(responseMimeType = "application/json")
+            )
+
             try {
-                Log.d(TAG, "Executing Request: model=$target, search=$useSearch")
-                val request = GeminiRequest(
-                    contents = listOf(GeminiContent(parts = listOf(GeminiPart(text = prompt)))),
-                    systemInstruction = GeminiContent(parts = listOf(GeminiPart(text = systemInstructionText))),
-                    tools = if (useSearch) listOf(GeminiTool(googleSearchRetrieval = emptyMap())) else null,
-                    generationConfig = GeminiGenerationConfig(responseMimeType = "application/json")
-                )
-
                 val response = api.generateContent(url, request)
                 val json = response.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text ?: continue
-                
                 val cleanJson = json.trim().removePrefix("```json").removeSuffix("```").trim()
                 
-                return try {
-                    val result = Gson().fromJson(cleanJson, PhoneLookupResult::class.java)
-                    result.copy(phoneNumber = number, lookupDate = System.currentTimeMillis())
+                val result = try {
+                    Gson().fromJson(cleanJson, PhoneLookupResult::class.java)
                 } catch (e: Exception) {
-                    Log.e(TAG, "JSON Parsing failed for $number: ${e.message}")
-                    // Fallback: If evidence/sources are the problem, try to extract them manually or return partial
-                    throw Exception("Intelligence data format error. Gemini returned complex data types. Please try again.")
-                }
+                    null
+                } ?: continue
+
+                return result.copy(phoneNumber = number, lookupDate = System.currentTimeMillis())
+
             } catch (e: Exception) {
-                lastError = e
-                val errorBody = (e as? HttpException)?.response()?.errorBody()?.string()
-                
-                if (e is HttpException && e.code() == 429 && useSearch) {
-                    Log.w(TAG, "Search tool busy. Waiting 2.5s...")
+                val code = (e as? HttpException)?.code()
+                if (code == 429 && searchMode) {
                     delay(2500)
                     continue 
                 }
-
-                if (!errorBody.isNullOrBlank()) {
+                if (code == 503) {
+                    delay(2000)
                     try {
-                        val errorJson = Gson().fromJson(errorBody, GeminiErrorResponse::class.java)
-                        val msg = errorJson.error?.message
-                        if (!msg.isNullOrBlank()) throw Exception(msg)
-                    } catch (parseEx: Exception) { }
+                        val retryResponse = api.generateContent(url, request)
+                        val retryJson = retryResponse.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text ?: continue
+                        val retryCleanJson = retryJson.trim().removePrefix("```json").removeSuffix("```").trim()
+                        val retryResult = Gson().fromJson(retryCleanJson, PhoneLookupResult::class.java)
+                        return retryResult.copy(phoneNumber = number, lookupDate = System.currentTimeMillis())
+                    } catch (re: Exception) {
+                        break 
+                    }
                 }
+                if (code == 404) continue 
+                
+                val body = (e as? HttpException)?.response()?.errorBody()?.string()
+                val errorMsg = if (code != null) "API Error $code: $body" else "Network error: ${e.message}"
+                ConsoleLogger.log("GEMINI", "Request failed: $errorMsg", LogLevel.ERROR)
                 break 
             }
         }
-        if (lastError != null) throw lastError
         return null
     }
 
@@ -228,6 +252,6 @@ class GeminiPhoneLookupService(
     data class GeminiResponse(val candidates: List<GeminiCandidate>?)
     data class GeminiCandidate(val content: GeminiContent?)
 
-    data class GeminiErrorResponse(val error: GeminiErrorDetail?)
-    data class GeminiErrorDetail(val code: Int, val message: String, val status: String)
+    data class GeminiModelListResponse(val models: List<GeminiModelDetail>?)
+    data class GeminiModelDetail(val name: String, val version: String, val displayName: String)
 }

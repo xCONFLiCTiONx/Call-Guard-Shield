@@ -3,8 +3,8 @@ package com.xconflictionx.callguardshield.ui.component
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.Message
 import androidx.compose.material.icons.filled.Block
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
@@ -65,7 +65,7 @@ fun NumberActionMenu(
             // Action Items
             ListItem(
                 headlineContent = { Text("Identify Caller") },
-                leadingContent = { Icon(Icons.AutoMirrored.Filled.Message, contentDescription = null) },
+                leadingContent = { Icon(Icons.Default.Search, contentDescription = null) },
                 modifier = Modifier.clickable { 
                     onIdentify()
                     onDismiss()

@@ -26,31 +26,35 @@ class CallGuardShieldEngine(
         // Normalize incoming number for matching (E.164)
         val normalizedIncoming = PhoneHelper.normalizeToE164(phoneNumber)
 
-        // 1. Whitelist (Highest Priority)
-        val whitelistMatch = dao.findWhitelistMatch(normalizedIncoming)
-        if (whitelistMatch != null) {
-            return BlockResult.Allow(isContact = false)
+        // 1. Whitelist (Highest Priority) - Absolute bypass (if enabled)
+        if (settings.whitelistEnabled) {
+            val whitelistMatch = dao.findWhitelistMatch(normalizedIncoming)
+            if (whitelistMatch != null) {
+                return BlockResult.Allow(isContact = false)
+            }
         }
 
-        // 2. Contacts (Allows known people)
+        // 2. Contacts (Allows known people) - Absolute bypass
         val isContact = isNumberInContacts(phoneNumber)
         if (isContact) {
             return BlockResult.Allow(isContact = true)
         }
 
-        // 3. Rules for non-contacts
-        if (settings.blockNonContacts) {
+        // 3. Rules for non-contacts - From here on, settings apply
+        if (settings.allowOnlyContacts) {
             return BlockResult.Block("Not in Contacts", isContact = false)
         }
 
-        // 4. Blacklist (Indexed Prefix Match)
-        val blacklistMatch = dao.findBlacklistMatch(normalizedIncoming)
-        if (blacklistMatch != null) {
-            val label = blacklistMatch.label?.let { " ($it)" } ?: ""
-            return BlockResult.Block("Blacklisted Match$label", isContact = false)
+        // 4. Blacklist (Manual blocking) (if enabled)
+        if (settings.blacklistEnabled) {
+            val blacklistMatch = dao.findBlacklistMatch(normalizedIncoming)
+            if (blacklistMatch != null) {
+                val label = blacklistMatch.label?.let { " ($it)" } ?: ""
+                return BlockResult.Block("Blacklisted Match$label", isContact = false)
+            }
         }
 
-        // 5. Global Spam (Indexed Prefix Match)
+        // 5. Global Spam DB (Community blocking)
         if (settings.enabledDictionaries.contains("global")) {
             val globalSpamMatch = dao.findGlobalSpamByPattern(normalizedIncoming)
             if (globalSpamMatch != null) {
@@ -61,16 +65,17 @@ class CallGuardShieldEngine(
         // 6. Dynamic "Out of State" Blocking
         val areaCode = extractAreaCode(phoneNumber)
         if (areaCode != null) {
-            val callerState = AreaCodeManager.getStateForAreaCode(areaCode)
-            if (settings.blockNonArkansas && callerState != null) {
-                val myState = locationManager.getCurrentState() ?: "Arkansas"
-                if (callerState != myState) {
+            if (settings.blockOutOfState) {
+                val callerState = AreaCodeManager.getStateForAreaCode(areaCode)
+                val myState = locationManager.getCurrentState() ?: "Arkansas" // Default to AR if location fails
+                
+                if (callerState != null && callerState != myState) {
                     return BlockResult.Block("Out of State ($callerState)", isContact = false)
                 }
             }
         }
 
-        // 7. International
+        // 7. International Blocking
         if (settings.blockInternational && isInternational(phoneNumber)) {
             return BlockResult.Block("International Call", isContact = false)
         }

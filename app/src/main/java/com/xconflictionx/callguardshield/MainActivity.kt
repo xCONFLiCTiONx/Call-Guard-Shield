@@ -1,6 +1,7 @@
 package com.xconflictionx.callguardshield
 
 import android.app.role.RoleManager
+import android.content.Intent
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -11,7 +12,6 @@ import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
-import androidx.compose.material.icons.automirrored.filled.Message
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Settings
@@ -19,36 +19,52 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import androidx.navigation.compose.currentBackStackEntryAsState
 import com.xconflictionx.callguardshield.ui.MainViewModel
 import com.xconflictionx.callguardshield.ui.screen.*
 import com.xconflictionx.callguardshield.ui.theme.CallGuardShieldTheme
 
 class MainActivity : ComponentActivity() {
     private val roleRequestLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { }
+    private val intentState = mutableStateOf<Intent?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         installSplashScreen()
         super.onCreate(savedInstanceState)
+        intentState.value = intent
         enableEdgeToEdge()
         setContent {
             val context = LocalContext.current
+            val viewModel: MainViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
+            
             CallGuardShieldTheme {
                 var showMainApp by remember { mutableStateOf(checkAllPermissions(context)) }
                 
                 if (!showMainApp) {
                     PermissionScreen(
                         onRequestRole = { requestCallScreeningRole() },
-                        onContinue = { showMainApp = true }
+                        onContinue = { 
+                            showMainApp = true
+                        }
                     )
                 } else {
-                    MainApp()
+                    MainApp(viewModel, intentState.value)
                 }
             }
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        intentState.value = intent
     }
 
     private fun requestCallScreeningRole() {
@@ -65,11 +81,28 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-fun MainApp() {
+fun MainApp(viewModel: MainViewModel, initialIntent: Intent? = null) {
     val navController = rememberNavController()
-    val viewModel: MainViewModel = viewModel()
     val context = LocalContext.current
+
+    // Derive selected item from navigation state for perfect sync
+    val navBackStackEntry by navController.currentBackStackEntryAsState()
+    val currentRoute = navBackStackEntry?.destination?.route ?: "home"
     
+    val items = listOf("Home", "History", "Lists", "Settings")
+    val routes = listOf("home", "history", "lists", "settings")
+    val icons = listOf(
+        Icons.Default.Home, 
+        Icons.Default.History, 
+        Icons.AutoMirrored.Filled.List, 
+        Icons.Default.Settings
+    )
+
+    val selectedItem = remember(currentRoute) {
+        val index = routes.indexOf(currentRoute)
+        if (index != -1) index else 0
+    }
+
     // Global UI Event Observer
     LaunchedEffect(Unit) {
         viewModel.uiEvent.collect { event ->
@@ -81,29 +114,34 @@ fun MainApp() {
         }
     }
 
-    var selectedItem by remember { mutableIntStateOf(0) }
-    val items = listOf("Home", "History", "Lists", "Chat", "Settings")
-    val icons = listOf(
-        Icons.Default.Home, 
-        Icons.Default.History, 
-        Icons.AutoMirrored.Filled.List, 
-        Icons.AutoMirrored.Filled.Message,
-        Icons.Default.Settings
-    )
+    // Handle App Shortcut and Notification Intents
+    LaunchedEffect(initialIntent) {
+        initialIntent?.let { intent ->
+            when (intent.getStringExtra("shortcut")) {
+                "history" -> {
+                    navController.navigate("history") {
+                        popUpTo("home") { saveState = true }
+                        launchSingleTop = true
+                        restoreState = true
+                    }
+                }
+            }
+        }
+    }
 
-    // Centralized navigation logic
-    val navTo: (String, Int) -> Unit = { route, index ->
-        if (selectedItem == index) {
-            // If already on this tab, pop to the root of the tab to "reset" it
-            navController.popBackStack(route, inclusive = false)
-        } else {
-            selectedItem = index
-            if (index == 3) viewModel.clearChat()
+    val navTo: (String, Int) -> Unit = { route, _ ->
+        if (currentRoute != route) {
             navController.navigate(route) {
-                popUpTo("home") { saveState = true }
+                // This ensures the back button takes you to the Home tab
+                popUpTo("home") {
+                    saveState = true
+                }
                 launchSingleTop = true
                 restoreState = true
             }
+        } else {
+            // If already on the tab, reset to root
+            navController.popBackStack(route, inclusive = false)
         }
     }
 
@@ -115,7 +153,7 @@ fun MainApp() {
                         icon = { Icon(icons[index], contentDescription = item) },
                         label = { Text(item) },
                         selected = selectedItem == index,
-                        onClick = { navTo(item.lowercase(), index) }
+                        onClick = { navTo(routes[index], index) }
                     )
                 }
             }
@@ -126,24 +164,15 @@ fun MainApp() {
             startDestination = "home",
             modifier = Modifier.padding(innerPadding)
         ) {
-            val navigateToChat = { navTo("chat", 3) }
-
             composable("home") { 
                 MainScreen(
                     viewModel = viewModel, 
-                    onNavigateToHistory = { navTo("history", 1) },
-                    onNavigateToGlobalSpam = {
-                        navController.navigate("global_spam_list")
-                    }
+                    onNavigateToHistory = { navTo("history", 1) }
                 ) 
             }
-            composable("history") { HistoryScreen(viewModel, onNavigateToChat = navigateToChat) }
-            composable("lists") { ListManagementScreen(viewModel, onNavigateToChat = navigateToChat) }
-            composable("chat") { ChatScreen(viewModel) }
+            composable("history") { HistoryScreen(viewModel) }
+            composable("lists") { ListManagementScreen(viewModel) }
             composable("settings") { SettingsScreen(viewModel) }
-            composable("global_spam_list") { 
-                GlobalSpamListScreen(viewModel, onNavigateBack = { navController.popBackStack() }) 
-            }
         }
     }
 }

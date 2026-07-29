@@ -31,7 +31,7 @@ import java.util.*
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun HistoryScreen(viewModel: MainViewModel, onNavigateToChat: () -> Unit) {
+fun HistoryScreen(viewModel: MainViewModel) {
     val logs by viewModel.callLogs.collectAsState()
     val selectedNumberIntel by viewModel.selectedNumberIntel.collectAsState()
     val foregroundNumber by viewModel.foregroundNumber.collectAsState()
@@ -105,6 +105,7 @@ fun HistoryScreen(viewModel: MainViewModel, onNavigateToChat: () -> Unit) {
             if (!showSettings && selectedItem != null) {
                 val (number, label) = selectedItem!!
                 NumberDetailsSheet(
+                    viewModel = viewModel,
                     number = number,
                     label = label,
                     intelResult = selectedNumberIntel,
@@ -113,7 +114,6 @@ fun HistoryScreen(viewModel: MainViewModel, onNavigateToChat: () -> Unit) {
                     onOpenSettings = { showSettings = true },
                     onIdentify = {
                         viewModel.performInvestigation(number)
-                        onNavigateToChat()
                     }
                 )
             }
@@ -127,8 +127,7 @@ fun HistoryScreen(viewModel: MainViewModel, onNavigateToChat: () -> Unit) {
                     label = label,
                     onDismiss = { showSettings = false },
                     onIdentify = {
-                        viewModel.setAutoQuery(number, label)
-                        onNavigateToChat()
+                        viewModel.performInvestigation(number)
                     },
                     onAddToWhitelist = { viewModel.addToWhitelist(number, it) },
                     onAddToBlacklist = { viewModel.addToBlacklist(number, it) },

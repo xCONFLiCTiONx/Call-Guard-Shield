@@ -41,19 +41,24 @@ fun PermissionScreen(
         
         // State to track all permissions
         var contactsGranted by remember { mutableStateOf(hasPermission(context, android.Manifest.permission.READ_CONTACTS)) }
-        var locationGranted by remember { mutableStateOf(hasPermission(context, android.Manifest.permission.ACCESS_FINE_LOCATION)) }
+        
+        var locationFineGranted by remember { mutableStateOf(hasPermission(context, android.Manifest.permission.ACCESS_FINE_LOCATION)) }
+        var locationBackgroundGranted by remember { 
+            mutableStateOf(if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) hasPermission(context, android.Manifest.permission.ACCESS_BACKGROUND_LOCATION) else true) 
+        }
+        
         var phoneStateGranted by remember { mutableStateOf(hasPermission(context, android.Manifest.permission.READ_PHONE_STATE)) }
-        var smsGranted by remember { mutableStateOf(hasPermission(context, android.Manifest.permission.RECEIVE_SMS)) }
+        var notificationsGranted by remember { mutableStateOf(if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) hasPermission(context, android.Manifest.permission.POST_NOTIFICATIONS) else true) }
         var roleGranted by remember { mutableStateOf(checkCallScreeningRole(context)) }
         
         var roleAvailable by remember { mutableStateOf(true) }
         
-        // Check role availability
-        LaunchedEffect(Unit) {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                val roleManager = context.getSystemService(RoleManager::class.java)
-                roleAvailable = roleManager?.isRoleAvailable(RoleManager.ROLE_CALL_SCREENING) == true
+        // Helper to launch app settings
+        val openSettings = {
+            val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                data = Uri.parse("package:${context.packageName}")
             }
+            context.startActivity(intent)
         }
 
         // Re-check permissions when app comes to foreground
@@ -61,9 +66,10 @@ fun PermissionScreen(
             val observer = LifecycleEventObserver { _, event ->
                 if (event == Lifecycle.Event.ON_RESUME) {
                     contactsGranted = hasPermission(context, android.Manifest.permission.READ_CONTACTS)
-                    locationGranted = hasPermission(context, android.Manifest.permission.ACCESS_FINE_LOCATION)
+                    locationFineGranted = hasPermission(context, android.Manifest.permission.ACCESS_FINE_LOCATION)
+                    locationBackgroundGranted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) hasPermission(context, android.Manifest.permission.ACCESS_BACKGROUND_LOCATION) else true
                     phoneStateGranted = hasPermission(context, android.Manifest.permission.READ_PHONE_STATE)
-                    smsGranted = hasPermission(context, android.Manifest.permission.RECEIVE_SMS)
+                    notificationsGranted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) hasPermission(context, android.Manifest.permission.POST_NOTIFICATIONS) else true
                     roleGranted = checkCallScreeningRole(context)
                 }
             }
@@ -75,13 +81,18 @@ fun PermissionScreen(
             ActivityResultContracts.RequestMultiplePermissions()
         ) { result ->
             contactsGranted = result[android.Manifest.permission.READ_CONTACTS] ?: contactsGranted
-            locationGranted = result[android.Manifest.permission.ACCESS_FINE_LOCATION] ?: locationGranted
+            locationFineGranted = result[android.Manifest.permission.ACCESS_FINE_LOCATION] ?: locationFineGranted
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                locationBackgroundGranted = result[android.Manifest.permission.ACCESS_BACKGROUND_LOCATION] ?: locationBackgroundGranted
+            }
             phoneStateGranted = result[android.Manifest.permission.READ_PHONE_STATE] ?: phoneStateGranted
-            smsGranted = result[android.Manifest.permission.RECEIVE_SMS] ?: smsGranted
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                notificationsGranted = result[android.Manifest.permission.POST_NOTIFICATIONS] ?: notificationsGranted
+            }
             roleGranted = checkCallScreeningRole(context)
         }
 
-        val basePermissionsGranted = contactsGranted && locationGranted && phoneStateGranted && smsGranted
+        val basePermissionsGranted = contactsGranted && locationFineGranted && locationBackgroundGranted && phoneStateGranted && notificationsGranted
         val allGranted = basePermissionsGranted && (roleGranted || !roleAvailable)
 
         // Auto-trigger Call Screening role request when base permissions are granted
@@ -93,7 +104,7 @@ fun PermissionScreen(
 
         Scaffold(
             modifier = Modifier.fillMaxSize(),
-            containerColor = Color.Black, // Explicitly black as requested
+            containerColor = Color.Black,
             bottomBar = {
                 Column(
                     modifier = Modifier
@@ -104,35 +115,24 @@ fun PermissionScreen(
                     if (!allGranted) {
                         Button(
                             onClick = {
-                                launcher.launch(
-                                    arrayOf(
-                                        android.Manifest.permission.READ_CONTACTS,
-                                        android.Manifest.permission.ACCESS_FINE_LOCATION,
-                                        android.Manifest.permission.READ_PHONE_STATE,
-                                        android.Manifest.permission.RECEIVE_SMS,
-                                        android.Manifest.permission.READ_CALL_LOG,
-                                        android.Manifest.permission.ANSWER_PHONE_CALLS,
-                                        android.Manifest.permission.READ_PHONE_NUMBERS,
-                                        android.Manifest.permission.CALL_PHONE
-                                    )
+                                val permissionsList = mutableListOf(
+                                    android.Manifest.permission.READ_CONTACTS,
+                                    android.Manifest.permission.ACCESS_FINE_LOCATION,
+                                    android.Manifest.permission.READ_PHONE_STATE,
+                                    android.Manifest.permission.READ_CALL_LOG,
+                                    android.Manifest.permission.ANSWER_PHONE_CALLS,
+                                    android.Manifest.permission.READ_PHONE_NUMBERS,
+                                    android.Manifest.permission.CALL_PHONE
                                 )
+                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                                    permissionsList.add(android.Manifest.permission.POST_NOTIFICATIONS)
+                                }
+                                launcher.launch(permissionsList.toTypedArray())
                             },
                             modifier = Modifier.fillMaxWidth(),
                             colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary)
                         ) {
-                            Text("Grant Permissions")
-                        }
-                        Spacer(modifier = Modifier.height(12.dp))
-                        
-                        Button(
-                            onClick = { onRequestRole() },
-                            enabled = basePermissionsGranted && roleAvailable && !roleGranted,
-                            modifier = Modifier.fillMaxWidth(),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = if (basePermissionsGranted) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant
-                            )
-                        ) {
-                            Text("Enable Silent Blocking")
+                            Text("Grant Core Permissions")
                         }
                         Spacer(modifier = Modifier.height(12.dp))
                     }
@@ -173,22 +173,68 @@ fun PermissionScreen(
                     Column(modifier = Modifier.padding(16.dp)) {
                         Text("System Diagnosis", fontWeight = FontWeight.Bold, color = Color.Cyan)
                         Text("Role Available: ${if (roleAvailable) "YES" else "NO"}", style = MaterialTheme.typography.bodySmall, color = Color.LightGray)
-                        Text("Role Held: ${if (roleGranted) "YES" else "NO"}", style = MaterialTheme.typography.bodySmall, color = Color.LightGray)
-                        Text("Samsung Model: S23 FE detected", style = MaterialTheme.typography.bodySmall, color = Color.LightGray)
+                        Text("Silent Block Active: ${if (roleGranted) "YES" else "NO"}", style = MaterialTheme.typography.bodySmall, color = Color.LightGray)
                     }
                 }
 
-                PermissionItem("Contacts", "Identify your friends.", contactsGranted) { openAppSettings(context) }
-                PermissionItem("Location", "Block out-of-state area codes.", locationGranted) { openAppSettings(context) }
-                PermissionItem("Phone State", "Detect incoming calls.", phoneStateGranted) { openAppSettings(context) }
-                PermissionItem("SMS", "Filter spam messages.", smsGranted) { openAppSettings(context) }
+                PermissionItem(
+                    title = "Contacts", 
+                    description = "Identify your friends.", 
+                    granted = contactsGranted
+                ) { 
+                    if (contactsGranted) openSettings()
+                    else launcher.launch(arrayOf(android.Manifest.permission.READ_CONTACTS))
+                }
+
+                PermissionItem(
+                    title = "Phone", 
+                    description = "Detect and manage calls.", 
+                    granted = phoneStateGranted
+                ) { 
+                    if (phoneStateGranted) openSettings()
+                    else launcher.launch(arrayOf(android.Manifest.permission.READ_PHONE_STATE, android.Manifest.permission.CALL_PHONE))
+                }
+
+                PermissionItem(
+                    title = "Notifications", 
+                    description = "Real-time alerts.", 
+                    granted = notificationsGranted
+                ) { 
+                    if (notificationsGranted) openSettings()
+                    else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                        launcher.launch(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS))
+                    }
+                }
+
+                val locationStatus = when {
+                    locationFineGranted && locationBackgroundGranted -> true // Green
+                    locationFineGranted -> false // Trigger Yellow warning
+                    else -> false // Trigger Red denied
+                }
+                
+                PermissionItem(
+                    title = "Location", 
+                    description = "Required for regional blocking.", 
+                    granted = locationStatus,
+                    warning = locationFineGranted && !locationBackgroundGranted
+                ) { 
+                    if (locationFineGranted && !locationBackgroundGranted) {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                            launcher.launch(arrayOf(android.Manifest.permission.ACCESS_BACKGROUND_LOCATION))
+                        }
+                    } else if (locationStatus) {
+                        openSettings()
+                    } else {
+                        launcher.launch(arrayOf(android.Manifest.permission.ACCESS_FINE_LOCATION))
+                    }
+                }
                 
                 if (roleAvailable) {
                     PermissionItem(
                         title = "Silent Blocking", 
-                        description = "Sets the app as your Spam & Call ID provider.", 
+                        description = "Enable native AI call screening.", 
                         granted = roleGranted
-                    ) { if (basePermissionsGranted) onRequestRole() else openAppSettings(context) }
+                    ) { if (basePermissionsGranted) onRequestRole() else launcher.launch(arrayOf(android.Manifest.permission.READ_PHONE_STATE)) }
                 }
 
                 Spacer(modifier = Modifier.height(32.dp))
@@ -223,25 +269,13 @@ fun PermissionItem(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Icon(
-                imageVector = when {
-                    granted -> Icons.Default.CheckCircle
-                    else -> Icons.Default.Warning
-                },
+                imageVector = if (granted) Icons.Default.CheckCircle else Icons.Default.Warning,
                 contentDescription = null,
-                tint = when {
-                    granted -> Color.Green
-                    warning -> Color.Yellow
-                    else -> Color.Red
-                }
+                tint = if (granted) Color.Green else if (warning) Color.Yellow else Color.Red
             )
             Spacer(modifier = Modifier.width(16.dp))
             Column {
-                val textColor = when {
-                    granted -> Color.Green
-                    warning -> Color.Yellow
-                    else -> Color.Red
-                }
-                Text(title, fontWeight = FontWeight.Bold, color = textColor)
+                Text(title, fontWeight = FontWeight.Bold, color = if (granted) Color.Green else if (warning) Color.Yellow else Color.Red)
                 Text(description, style = MaterialTheme.typography.bodySmall, color = Color.LightGray)
             }
         }
@@ -256,31 +290,27 @@ fun checkCallScreeningRole(context: Context): Boolean {
     return true
 }
 
-private fun openAppSettings(context: Context) {
-    val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
-        data = Uri.fromParts("package", context.packageName, null)
-    }
-    context.startActivity(intent)
-}
-
 fun hasPermission(context: Context, permission: String): Boolean {
     return ContextCompat.checkSelfPermission(context, permission) == android.content.pm.PackageManager.PERMISSION_GRANTED
 }
 
-fun checkAllPermissions(context: Context): Boolean {
-    val roleAvailable = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-        val roleManager = context.getSystemService(RoleManager::class.java)
-        roleManager?.isRoleAvailable(RoleManager.ROLE_CALL_SCREENING) == true
-    } else false
+fun isNotificationListenerEnabled(context: Context): Boolean {
+    val pkgName = context.packageName
+    val flat = Settings.Secure.getString(context.contentResolver, "enabled_notification_listeners")
+    return flat?.contains(pkgName) == true
+}
 
-    val basePermissions = hasPermission(context, android.Manifest.permission.READ_CONTACTS) &&
-            hasPermission(context, android.Manifest.permission.ACCESS_FINE_LOCATION) &&
-            hasPermission(context, android.Manifest.permission.READ_PHONE_STATE) &&
-            hasPermission(context, android.Manifest.permission.RECEIVE_SMS)
+fun checkAllPermissions(context: Context): Boolean {
+    val contacts = hasPermission(context, android.Manifest.permission.READ_CONTACTS)
+    val phone = hasPermission(context, android.Manifest.permission.READ_PHONE_STATE)
+    val notifications = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        hasPermission(context, android.Manifest.permission.POST_NOTIFICATIONS)
+    } else true
     
-    return if (roleAvailable) {
-        basePermissions && checkCallScreeningRole(context)
-    } else {
-        basePermissions
-    }
+    val locationFine = hasPermission(context, android.Manifest.permission.ACCESS_FINE_LOCATION)
+    val locationBg = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        hasPermission(context, android.Manifest.permission.ACCESS_BACKGROUND_LOCATION)
+    } else true
+    
+    return contacts && phone && notifications && locationFine && locationBg && checkCallScreeningRole(context)
 }

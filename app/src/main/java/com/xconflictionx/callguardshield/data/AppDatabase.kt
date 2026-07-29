@@ -19,7 +19,7 @@ import com.xconflictionx.callguardshield.data.entity.*
         GlobalSpamEntry::class,
         PhoneLookupResult::class
     ],
-    version = 14,
+    version = 18,
     exportSchema = true
 )
 @TypeConverters(Converters::class)

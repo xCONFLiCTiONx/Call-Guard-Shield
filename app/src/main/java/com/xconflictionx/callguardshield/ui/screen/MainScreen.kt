@@ -12,12 +12,14 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.xconflictionx.callguardshield.ui.UiEvent
 import com.xconflictionx.callguardshield.ui.MainViewModel
+import com.xconflictionx.callguardshield.ui.component.SecurityStatusSheet
 import java.text.SimpleDateFormat
 import java.util.*
 
 @Composable
-fun MainScreen(viewModel: MainViewModel, onNavigateToHistory: () -> Unit, onNavigateToGlobalSpam: () -> Unit) {
+fun MainScreen(viewModel: MainViewModel, onNavigateToHistory: () -> Unit) {
     val settings by viewModel.settings.collectAsState()
     val callLogs by viewModel.callLogs.collectAsState()
     val isSyncing by viewModel.isSyncing.collectAsState()
@@ -25,6 +27,8 @@ fun MainScreen(viewModel: MainViewModel, onNavigateToHistory: () -> Unit, onNavi
     val whitelist by viewModel.whitelist.collectAsState()
     val globalSpamCount by viewModel.globalSpamCount.collectAsState()
     
+    var showSecuritySheet by remember { mutableStateOf(false) }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -89,7 +93,7 @@ fun MainScreen(viewModel: MainViewModel, onNavigateToHistory: () -> Unit, onNavi
         Card(
             modifier = Modifier.fillMaxWidth(),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
-            onClick = onNavigateToGlobalSpam
+            onClick = { showSecuritySheet = true }
         ) {
             Row(
                 modifier = Modifier.padding(16.dp),
@@ -97,7 +101,7 @@ fun MainScreen(viewModel: MainViewModel, onNavigateToHistory: () -> Unit, onNavi
             ) {
                 Column(modifier = Modifier.weight(1f)) {
                     val totalRules = blacklist.size + whitelist.size + globalSpamCount
-                    val lastSync = settings?.lastSyncTime ?: 0L
+                    val lastSync = settings.lastSyncTime
                     val locale = LocalConfiguration.current.locales[0]
                     val syncText = if (lastSync > 0) {
                         "Protection is up-to-date. (Last check: " + SimpleDateFormat("MMM dd, HH:mm", locale).format(Date(lastSync)) + ")"
@@ -111,6 +115,13 @@ fun MainScreen(viewModel: MainViewModel, onNavigateToHistory: () -> Unit, onNavi
             }
         }
         
+        if (showSecuritySheet) {
+            SecurityStatusSheet(
+                viewModel = viewModel,
+                onDismiss = { showSecuritySheet = false }
+            )
+        }
+
         if (isSyncing) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 LinearProgressIndicator(modifier = Modifier.fillMaxWidth())

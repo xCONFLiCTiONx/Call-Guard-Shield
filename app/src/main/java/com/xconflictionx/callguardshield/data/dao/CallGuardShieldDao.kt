@@ -10,6 +10,9 @@ interface CallGuardShieldDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertBlockedCall(call: BlockedCall)
 
+    @Query("DELETE FROM call_log")
+    suspend fun clearCallLogs()
+
     @Query("SELECT * FROM blocked_calls ORDER BY timestamp DESC")
     fun getAllBlockedCalls(): Flow<List<BlockedCall>>
 

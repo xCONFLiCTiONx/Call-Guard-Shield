@@ -39,6 +39,15 @@ android {
     buildFeatures {
         compose = true
     }
+    packaging {
+        resources {
+            excludes += "/META-INF/{AL2.0,LGPL2.1}"
+            excludes += "/META-INF/DEPENDENCIES"
+            excludes += "/META-INF/LICENSE*"
+            excludes += "/META-INF/NOTICE*"
+            excludes += "/META-INF/INDEX.LIST"
+        }
+    }
 }
 
 room {
@@ -57,6 +66,7 @@ dependencies {
     implementation(libs.androidx.core.splashscreen)
     implementation(libs.androidx.fragment.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
+    implementation(libs.coil.compose)
 
     // Room
     implementation(libs.androidx.room.runtime)
@@ -78,6 +88,17 @@ dependencies {
     // Location
     implementation(libs.play.services.location)
     implementation(libs.kotlinx.coroutines.play.services)
+
+    // Google Sign-In & Credentials
+    implementation(libs.play.services.auth)
+    implementation("androidx.credentials:credentials:1.3.0")
+    implementation("androidx.credentials:credentials-play-services-auth:1.3.0")
+    implementation("com.google.android.libraries.identity.googleid:googleid:1.1.1")
+    
+    // Google Drive API
+    implementation("com.google.api-client:google-api-client-android:2.4.0")
+    implementation("com.google.apis:google-api-services-drive:v3-rev20240123-2.0.0")
+    implementation("com.google.http-client:google-http-client-gson:1.44.1")
 
     // Web Scraping
     implementation(libs.jsoup)
