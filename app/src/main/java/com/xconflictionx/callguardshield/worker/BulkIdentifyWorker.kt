@@ -73,7 +73,7 @@ class BulkIdentifyWorker(
                             if (bestName != "Unknown") {
                                 val formattedInfo = buildString {
                                     append("Risk: ${if (result.scam) "HIGH" else if (result.spam) "MEDIUM" else "LOW"} • ")
-                                    append("Acc: ${(result.confidence?.times(100))?.toInt()}% • ")
+                                    append("Accuracy: ${result.accuracy}% • ")
                                     append(result.summary?.take(60))
                                 }
                                 

@@ -21,19 +21,18 @@ import com.xconflictionx.callguardshield.data.entity.PhoneLookupResult
 fun PhoneLookupResultCard(
     result: PhoneLookupResult, 
     wasAutoApplied: Boolean = true,
-    oldConfidence: Double? = null,
+    oldAccuracy: Int? = null,
     onRefine: (String) -> Unit = {},
     onApply: (PhoneLookupResult) -> Unit = {}
 ) {
-    val confidence = result.confidence ?: 0.0
-    val displayConfidence = (confidence * 100).toInt().coerceIn(0, 100)
+    val accuracy = result.accuracy
     val context = LocalContext.current
     val clipboardManager = androidx.compose.ui.platform.LocalClipboardManager.current
     
     val (tierText, tierColor) = when {
-        confidence >= 0.9 -> "Verified" to Color(0xFF4CAF50) // Green
-        confidence >= 0.6 -> "Likely" to Color(0xFFFFC107)   // Amber/Yellow
-        confidence >= 0.1 -> "Unverified" to Color.Gray
+        accuracy >= 90 -> "Verified" to Color(0xFF4CAF50) // Green
+        accuracy >= 60 -> "Likely" to Color(0xFFFFC107)   // Amber/Yellow
+        accuracy >= 10 -> "Unverified" to Color.Gray
         else -> "Unknown" to Color(0xFFF44336)              // Red
     }
 
@@ -76,7 +75,7 @@ fun PhoneLookupResultCard(
                                     fontWeight = FontWeight.Bold
                                 )
                             }
-                        } else if (wasAutoApplied && oldConfidence != null) {
+                        } else if (wasAutoApplied && oldAccuracy != null) {
                             Spacer(modifier = Modifier.width(8.dp))
                             Surface(
                                 color = Color.Green.copy(alpha = 0.1f),
@@ -100,7 +99,7 @@ fun PhoneLookupResultCard(
                     shape = MaterialTheme.shapes.small
                 ) {
                     Text(
-                        "$tierText ($displayConfidence%)",
+                        "Accuracy: $accuracy%",
                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
                         style = MaterialTheme.typography.labelSmall,
                         color = tierColor,
@@ -109,14 +108,14 @@ fun PhoneLookupResultCard(
                 }
             }
 
-            if (!wasAutoApplied && oldConfidence != null) {
+            if (!wasAutoApplied && oldAccuracy != null) {
                 Spacer(modifier = Modifier.height(8.dp))
                 Surface(
                     color = MaterialTheme.colorScheme.error.copy(alpha = 0.1f),
                     shape = MaterialTheme.shapes.extraSmall
                 ) {
                     Text(
-                        text = "⚠️ Conflict: New confidence ($displayConfidence%) is lower than current records (${(oldConfidence * 100).toInt()}%).",
+                        text = "⚠️ Accuracy Conflict: New scan is $accuracy%, current is $oldAccuracy%.",
                         modifier = Modifier.padding(8.dp),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.error
@@ -136,7 +135,7 @@ fun PhoneLookupResultCard(
                 result.spam -> "Potential Spam"
                 result.debtCollector -> "Debt Collector"
                 result.telemarketer -> "Telemarketer"
-                confidence >= 0.9 -> "Authority Verified"
+                accuracy >= 90 -> "Authority Verified"
                 else -> tierText
             }
             ResultRow("Status", status, color = if (result.scam || result.spam) MaterialTheme.colorScheme.error else tierColor)
@@ -192,7 +191,7 @@ fun PhoneLookupResultCard(
             }
 
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (confidence < 0.8) {
+                if (accuracy < 80) {
                     OutlinedButton(
                         onClick = { onRefine(result.phoneNumber) },
                         modifier = Modifier.weight(1f),

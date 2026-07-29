@@ -19,7 +19,7 @@ import com.xconflictionx.callguardshield.data.entity.*
         GlobalSpamEntry::class,
         PhoneLookupResult::class
     ],
-    version = 18,
+    version = 20,
     exportSchema = true
 )
 @TypeConverters(Converters::class)
@@ -37,7 +37,6 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "call_guard_shield_database"
                 )
-                .fallbackToDestructiveMigration(dropAllTables = true)
                 .build()
                 INSTANCE = instance
                 instance

@@ -310,6 +310,7 @@ fun BlacklistTab(
             if (showSettings && selectedItem != null && !selectedItem!!.third) {
                 val (number, label, _) = selectedItem!!
                 NumberActionMenu(
+                    viewModel = viewModel,
                     number = number,
                     label = label,
                     onDismiss = { showSettings = false },
@@ -319,7 +320,18 @@ fun BlacklistTab(
                     onAddToWhitelist = { l -> viewModel.addToWhitelist(number, l) },
                     onAddToBlacklist = { l -> viewModel.addToBlacklist(number, l) },
                     onRemoveFromList = { 
-                        blacklist.find { it.pattern == number }?.let { viewModel.removeFromBlacklist(it) }
+                        blacklist.find { it.pattern == number }?.let { entry ->
+                            val index = blacklist.indexOf(entry)
+                            if (index != -1 && blacklist.size > 1) {
+                                val nextIndex = if (index < blacklist.size - 1) index + 1 else index - 1
+                                val nextEntry = blacklist[nextIndex]
+                                selectedItem = Triple(nextEntry.pattern, nextEntry.label, false)
+                                viewModel.fetchIntelForNumber(nextEntry.pattern)
+                            } else {
+                                selectedItem = null
+                            }
+                            viewModel.removeFromBlacklist(entry)
+                        }
                     },
                     onEditLabel = { 
                         showSettings = false
@@ -403,6 +415,7 @@ fun WhitelistTab(
             if (showSettings && selectedItem != null && !selectedItem!!.third) {
                 val (number, label, _) = selectedItem!!
                 NumberActionMenu(
+                    viewModel = viewModel,
                     number = number,
                     label = label,
                     onDismiss = { showSettings = false },
@@ -412,7 +425,18 @@ fun WhitelistTab(
                     onAddToWhitelist = { l -> viewModel.addToWhitelist(number, l) },
                     onAddToBlacklist = { l -> viewModel.addToBlacklist(number, l) },
                     onRemoveFromList = { 
-                        whitelist.find { it.number == number }?.let { viewModel.removeFromWhitelist(it) }
+                        whitelist.find { it.number == number }?.let { entry ->
+                            val index = whitelist.indexOf(entry)
+                            if (index != -1 && whitelist.size > 1) {
+                                val nextIndex = if (index < whitelist.size - 1) index + 1 else index - 1
+                                val nextEntry = whitelist[nextIndex]
+                                selectedItem = Triple(nextEntry.number, nextEntry.label, false)
+                                viewModel.fetchIntelForNumber(nextEntry.number)
+                            } else {
+                                selectedItem = null
+                            }
+                            viewModel.removeFromWhitelist(entry)
+                        }
                     },
                     onEditLabel = { 
                         showSettings = false

@@ -123,6 +123,7 @@ fun HistoryScreen(viewModel: MainViewModel) {
                 val (number, label) = selectedItem!!
                 val logEntry = logs.find { it.number == number }
                 NumberActionMenu(
+                    viewModel = viewModel,
                     number = number,
                     label = label,
                     onDismiss = { showSettings = false },
@@ -132,7 +133,19 @@ fun HistoryScreen(viewModel: MainViewModel) {
                     onAddToWhitelist = { viewModel.addToWhitelist(number, it) },
                     onAddToBlacklist = { viewModel.addToBlacklist(number, it) },
                     onRemoveFromList = { 
-                        logEntry?.let { viewModel.deleteCallLogEntry(it) }
+                        logEntry?.let { entry ->
+                            // Find next item before deleting
+                            val index = logs.indexOf(entry)
+                            if (index != -1 && logs.size > 1) {
+                                val nextIndex = if (index < logs.size - 1) index + 1 else index - 1
+                                val nextLog = logs[nextIndex]
+                                selectedItem = nextLog.number to (nextLog.callerName ?: nextLog.callerId ?: "Unknown")
+                                viewModel.fetchIntelForNumber(nextLog.number)
+                            } else {
+                                selectedItem = null
+                            }
+                            viewModel.deleteCallLogEntry(entry)
+                        }
                     },
                     removeLabel = "Delete from History",
                     onEditLabel = {
@@ -172,8 +185,7 @@ fun CallLogItem(
     val locale = LocalConfiguration.current.locales[0]
     val date = SimpleDateFormat("MMM dd, HH:mm", locale).format(Date(log.timestamp))
     
-    val displayName = log.callerName ?: if (log.isContact) "Verified Contact" else null
-    val headline = log.companyName ?: log.ownerName ?: displayName ?: log.number
+    val headline = log.callerName ?: log.number
     val showNumberInSub = headline != log.number
 
     Card(

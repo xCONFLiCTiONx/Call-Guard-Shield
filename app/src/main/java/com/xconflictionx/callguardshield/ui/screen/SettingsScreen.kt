@@ -48,8 +48,16 @@ fun SettingsScreen(viewModel: MainViewModel) {
     val lifecycleOwner = LocalLifecycleOwner.current
     
     var showLocationRationale by remember { mutableStateOf(false) }
+    var showSecurityStatus by remember { mutableStateOf(false) }
     var exportData by remember { mutableStateOf("") }
     var isConnectingGoogle by remember { mutableStateOf(false) }
+
+    if (showSecurityStatus) {
+        com.xconflictionx.callguardshield.ui.component.SecurityStatusSheet(
+            viewModel = viewModel,
+            onDismiss = { showSecurityStatus = false }
+        )
+    }
 
     val fileSaver = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("application/octet-stream")
@@ -119,6 +127,60 @@ fun SettingsScreen(viewModel: MainViewModel) {
         contentPadding = PaddingValues(24.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
+        // --- Status and Outlook ---
+        item {
+            Card(
+                colors = CardDefaults.cardColors(
+                    containerColor = if (settings.isPaused) MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.2f)
+                                    else Color(0xFF1B5E20).copy(alpha = 0.2f)
+                ),
+                onClick = { viewModel.togglePause() }
+            ) {
+                Row(
+                    modifier = Modifier.padding(16.dp).fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = if (settings.isPaused) "Status: PAUSED" else "Status: ACTIVE",
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Bold,
+                            color = if (settings.isPaused) MaterialTheme.colorScheme.error else Color.Green
+                        )
+                        Text(
+                            text = if (settings.isPaused) "Shields are currently down." else "Firewall is protecting you.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color.Gray
+                        )
+                    }
+                    Switch(
+                        checked = !settings.isPaused,
+                        onCheckedChange = { viewModel.togglePause() }
+                    )
+                }
+            }
+        }
+
+        item {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
+                onClick = { showSecurityStatus = true }
+            ) {
+                Row(
+                    modifier = Modifier.padding(16.dp).fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column {
+                        Text("Protection Status", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                        Text("View detailed firewall metrics and outlook.", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+                    }
+                    Icon(Icons.Default.ChevronRight, contentDescription = null)
+                }
+            }
+        }
+
         // 1. Security Zones
         item {
             Text("Security Zones", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
@@ -361,21 +423,6 @@ fun SettingsScreen(viewModel: MainViewModel) {
             }
         }
 
-        item {
-            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    SettingToggle(title = "Auto-Refresh Intel (30 Days)", description = "Automatically re-scan lists every month to verify status.", checked = settings.autoMaintenanceEnabled, onCheckedChange = { viewModel.updateAutoMaintenance(it) })
-                    HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp), color = Color.Gray.copy(alpha = 0.2f))
-                    val lastMaint = settings.lastMaintenanceTime
-                    val maintText = if (lastMaint == 0L) "Never refreshed" else "Last re-scan: " + SimpleDateFormat("MMM dd, HH:mm", Locale.getDefault()).format(Date(lastMaint))
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                        Text(maintText, style = MaterialTheme.typography.bodySmall, color = Color.Gray)
-                        Button(onClick = { viewModel.runMaintenanceNow() }, shape = MaterialTheme.shapes.small) { Text("Run Now", style = MaterialTheme.typography.labelSmall) }
-                    }
-                }
-            }
-        }
-
         // 6. Gemini Intel Engine (Now near the bottom)
         item {
             Text("Gemini Intel Engine", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
@@ -405,6 +452,20 @@ fun SettingsScreen(viewModel: MainViewModel) {
         }
 
         if (apiKeyStatus == "Connected") {
+            item {
+                Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        SettingToggle(title = "Auto-Refresh Intel (30 Days)", description = "Automatically re-scan lists every month to verify status.", checked = settings.autoMaintenanceEnabled, onCheckedChange = { viewModel.updateAutoMaintenance(it) })
+                        HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp), color = Color.Gray.copy(alpha = 0.2f))
+                        val lastMaint = settings.lastMaintenanceTime
+                        val maintText = if (lastMaint == 0L) "Never refreshed" else "Last re-scan: " + SimpleDateFormat("MMM dd, HH:mm", Locale.getDefault()).format(Date(lastMaint))
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                            Text(maintText, style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+                            Button(onClick = { viewModel.runMaintenanceNow() }, shape = MaterialTheme.shapes.small) { Text("Run Now", style = MaterialTheme.typography.labelSmall) }
+                        }
+                    }
+                }
+            }
             item { Text("AI Protection", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold) }
             item {
                 Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))) {
@@ -412,14 +473,14 @@ fun SettingsScreen(viewModel: MainViewModel) {
                         SettingToggle(title = "Real-Time Gemini Filtering", description = "Verify unknown callers with AI before the phone rings. (Requires internet)", checked = settings.aiRealTimeBlocking, onCheckedChange = { viewModel.updateAiRealTimeBlocking(it) })
                         if (settings.aiRealTimeBlocking) {
                             Column(modifier = Modifier.padding(start = 8.dp, top = 8.dp, bottom = 8.dp)) {
-                                Text(text = "Blocking Confidence: ${settings.aiBlockingConfidence}%", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
+                                Text(text = "Blocking Accuracy: ${settings.aiBlockingAccuracy}%", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
                                 Text(text = "Only block if Gemini is at least this sure about the result.", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
-                                Slider(value = settings.aiBlockingConfidence.toFloat(), onValueChange = { val snapped = ((it / 10f).roundToInt() * 10); viewModel.updateAiBlockingConfidence(snapped) }, valueRange = 0f..100f, steps = 9, modifier = Modifier.padding(top = 4.dp))
+                                Slider(value = settings.aiBlockingAccuracy.toFloat(), onValueChange = { val snapped = ((it / 10f).roundToInt() * 10); viewModel.updateAiBlockingAccuracy(snapped) }, valueRange = 0f..100f, steps = 9, modifier = Modifier.padding(top = 4.dp))
                                 val (warningText, warningColor) = when {
-                                    settings.aiBlockingConfidence >= 50 -> "Optimal" to Color.Green
-                                    settings.aiBlockingConfidence >= 30 -> "Lower confidence can give unexpected results." to Color(0xFFAAFF88)
-                                    settings.aiBlockingConfidence >= 20 -> "Lower confidence can give unexpected results." to Color.Yellow
-                                    else -> "Lower confidence can give unexpected results." to Color.Red
+                                    settings.aiBlockingAccuracy >= 50 -> "Optimal" to Color.Green
+                                    settings.aiBlockingAccuracy >= 30 -> "Lower accuracy can give unexpected results." to Color(0xFFAAFF88)
+                                    settings.aiBlockingAccuracy >= 20 -> "Lower accuracy can give unexpected results." to Color.Yellow
+                                    else -> "Lower accuracy can give unexpected results." to Color.Red
                                 }
                                 Text(text = warningText, style = MaterialTheme.typography.labelSmall, color = warningColor, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 2.dp))
                             }

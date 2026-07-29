@@ -13,16 +13,11 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.History
-import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalLifecycleOwner
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
-import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
@@ -85,14 +80,13 @@ fun MainApp(viewModel: MainViewModel, initialIntent: Intent? = null) {
     val navController = rememberNavController()
     val context = LocalContext.current
 
-    // Derive selected item from navigation state for perfect sync
+    // Derive selected item from navigation state
     val navBackStackEntry by navController.currentBackStackEntryAsState()
-    val currentRoute = navBackStackEntry?.destination?.route ?: "home"
+    val currentRoute = navBackStackEntry?.destination?.route ?: "history"
     
-    val items = listOf("Home", "History", "Lists", "Settings")
-    val routes = listOf("home", "history", "lists", "settings")
+    val items = listOf("History", "Lists", "Settings")
+    val routes = listOf("history", "lists", "settings")
     val icons = listOf(
-        Icons.Default.Home, 
         Icons.Default.History, 
         Icons.AutoMirrored.Filled.List, 
         Icons.Default.Settings
@@ -117,13 +111,11 @@ fun MainApp(viewModel: MainViewModel, initialIntent: Intent? = null) {
     // Handle App Shortcut and Notification Intents
     LaunchedEffect(initialIntent) {
         initialIntent?.let { intent ->
-            when (intent.getStringExtra("shortcut")) {
-                "history" -> {
-                    navController.navigate("history") {
-                        popUpTo("home") { saveState = true }
-                        launchSingleTop = true
-                        restoreState = true
-                    }
+            if (intent.getStringExtra("shortcut") == "history") {
+                navController.navigate("history") {
+                    popUpTo("history") { saveState = true }
+                    launchSingleTop = true
+                    restoreState = true
                 }
             }
         }
@@ -132,16 +124,10 @@ fun MainApp(viewModel: MainViewModel, initialIntent: Intent? = null) {
     val navTo: (String, Int) -> Unit = { route, _ ->
         if (currentRoute != route) {
             navController.navigate(route) {
-                // This ensures the back button takes you to the Home tab
-                popUpTo("home") {
-                    saveState = true
-                }
+                popUpTo("history") { saveState = true }
                 launchSingleTop = true
                 restoreState = true
             }
-        } else {
-            // If already on the tab, reset to root
-            navController.popBackStack(route, inclusive = false)
         }
     }
 
@@ -161,15 +147,9 @@ fun MainApp(viewModel: MainViewModel, initialIntent: Intent? = null) {
     ) { innerPadding ->
         NavHost(
             navController = navController,
-            startDestination = "home",
+            startDestination = "history",
             modifier = Modifier.padding(innerPadding)
         ) {
-            composable("home") { 
-                MainScreen(
-                    viewModel = viewModel, 
-                    onNavigateToHistory = { navTo("history", 1) }
-                ) 
-            }
             composable("history") { HistoryScreen(viewModel) }
             composable("lists") { ListManagementScreen(viewModel) }
             composable("settings") { SettingsScreen(viewModel) }

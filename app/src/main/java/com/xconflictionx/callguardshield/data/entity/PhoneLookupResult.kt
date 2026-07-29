@@ -12,7 +12,7 @@ data class PhoneLookupResult(
     val ownerName: String? = null,
     val companyName: String? = null,
     val category: String? = "Unknown",
-    val confidence: Double? = 0.0,
+    val accuracy: Int = 0, // Unified 0-100 scale
     val spam: Boolean = false,
     val scam: Boolean = false,
     val debtCollector: Boolean = false,
@@ -20,6 +20,7 @@ data class PhoneLookupResult(
     val summary: String? = null,
     val evidence: List<String>? = emptyList(),
     val sources: List<String>? = emptyList(),
+    val manualLabel: String? = null,
     val lastVerified: String? = null,
     val lookupDate: Long = System.currentTimeMillis(),
     val isCached: Boolean = false

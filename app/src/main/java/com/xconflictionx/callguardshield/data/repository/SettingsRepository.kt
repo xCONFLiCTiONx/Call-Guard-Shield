@@ -28,7 +28,7 @@ class SettingsRepository(private val context: Context) {
         val AI_REALTIME_BLOCKING = booleanPreferencesKey("ai_realtime_blocking")
         val BLOCK_DEBT_COLLECTORS = booleanPreferencesKey("block_debt_collectors")
         val BLOCK_TELEMARKETERS = booleanPreferencesKey("block_telemarketers")
-        val AI_BLOCKING_CONFIDENCE = intPreferencesKey("ai_blocking_confidence")
+        val AI_BLOCKING_ACCURACY = intPreferencesKey("ai_blocking_accuracy")
         val GOOGLE_ACCOUNT_EMAIL = stringPreferencesKey("google_account_email")
         val WHITELIST_ENABLED = booleanPreferencesKey("whitelist_enabled")
         val BLACKLIST_ENABLED = booleanPreferencesKey("blacklist_enabled")
@@ -52,7 +52,7 @@ class SettingsRepository(private val context: Context) {
             aiRealTimeBlocking = preferences[PreferencesKeys.AI_REALTIME_BLOCKING] ?: false,
             blockDebtCollectors = preferences[PreferencesKeys.BLOCK_DEBT_COLLECTORS] ?: false,
             blockTelemarketers = preferences[PreferencesKeys.BLOCK_TELEMARKETERS] ?: false,
-            aiBlockingConfidence = preferences[PreferencesKeys.AI_BLOCKING_CONFIDENCE] ?: 90,
+            aiBlockingAccuracy = preferences[PreferencesKeys.AI_BLOCKING_ACCURACY] ?: 90,
             googleAccountEmail = preferences[PreferencesKeys.GOOGLE_ACCOUNT_EMAIL],
             whitelistEnabled = preferences[PreferencesKeys.WHITELIST_ENABLED] ?: false,
             blacklistEnabled = preferences[PreferencesKeys.BLACKLIST_ENABLED] ?: false
@@ -123,8 +123,8 @@ class SettingsRepository(private val context: Context) {
         context.dataStore.edit { it[PreferencesKeys.BLOCK_TELEMARKETERS] = block }
     }
 
-    suspend fun updateAiBlockingConfidence(confidence: Int) {
-        context.dataStore.edit { it[PreferencesKeys.AI_BLOCKING_CONFIDENCE] = confidence }
+    suspend fun updateAiBlockingAccuracy(accuracy: Int) {
+        context.dataStore.edit { it[PreferencesKeys.AI_BLOCKING_ACCURACY] = accuracy }
     }
 
     suspend fun updateWhitelistEnabled(enabled: Boolean) {
@@ -157,7 +157,7 @@ class SettingsRepository(private val context: Context) {
             it[PreferencesKeys.AI_REALTIME_BLOCKING] = s.aiRealTimeBlocking
             it[PreferencesKeys.BLOCK_DEBT_COLLECTORS] = s.blockDebtCollectors
             it[PreferencesKeys.BLOCK_TELEMARKETERS] = s.blockTelemarketers
-            it[PreferencesKeys.AI_BLOCKING_CONFIDENCE] = s.aiBlockingConfidence
+            it[PreferencesKeys.AI_BLOCKING_ACCURACY] = s.aiBlockingAccuracy
             it[PreferencesKeys.WHITELIST_ENABLED] = s.whitelistEnabled
             it[PreferencesKeys.BLACKLIST_ENABLED] = s.blacklistEnabled
         }
@@ -181,7 +181,7 @@ data class UserSettings(
     val aiRealTimeBlocking: Boolean,
     val blockDebtCollectors: Boolean,
     val blockTelemarketers: Boolean,
-    val aiBlockingConfidence: Int,
+    val aiBlockingAccuracy: Int,
     val googleAccountEmail: String?,
     val whitelistEnabled: Boolean,
     val blacklistEnabled: Boolean

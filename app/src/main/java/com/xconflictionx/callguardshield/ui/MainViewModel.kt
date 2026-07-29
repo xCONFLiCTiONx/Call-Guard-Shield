@@ -133,8 +133,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 ConsoleLogger.logs.onEach { _consoleLogs.value = it }.launchIn(this)
                 val currentSettings = settingsRepo.settingsFlow.first()
                 _isGoogleDriveConnected.value = currentSettings.googleAccountEmail != null
-                if (!currentSettings.firstRunSyncComplete) forceSync()
-
+                
                 testGeminiKey()
                 refreshGeminiModels()
                 refreshBatteryStatus()
@@ -180,7 +179,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val apiKey = CryptoManager.getGeminiApiKey(getApplication())
                 if (apiKey.isNullOrBlank()) return@launch
                 
-                withTimeout(90000) { // Longer timeout for 3 deep scans
+                withTimeout(90000) { // Longer timeout for 3 scans
                     val result = getLookupDeepService().lookupThorough(number)
                     if (result != null) {
                         handleNewIntelResult(number, result)
@@ -196,39 +195,51 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private suspend fun handleNewIntelResult(number: String, newResult: PhoneLookupResult) {
         val currentResult = dao.getLookupResult(number)
-        val currentConfidence = currentResult?.confidence ?: -1.0
-        val newConfidence = newResult.confidence ?: 0.0
+        val currentAccuracy = currentResult?.accuracy ?: -1
+        val newAccuracy = newResult.accuracy
 
-        if (newConfidence > currentConfidence) {
+        // Always set pending so user can see what was found and manual button can show
+        _pendingIntelResult.value = newResult
+
+        // Auto-save logic: ONLY if new accuracy is higher AND there is no manual override label
+        if (newAccuracy > currentAccuracy && currentResult?.manualLabel == null) {
             applyInvestigationResult(number, newResult)
             _selectedNumberIntel.value = newResult
-            addChatMessage(ChatEntry.IntelReport(newResult, wasAutoApplied = true, oldConfidence = currentConfidence))
-        } else if (isDataDifferent(newResult, currentResult)) {
-            _pendingIntelResult.value = newResult
-            addChatMessage(ChatEntry.IntelReport(newResult, wasAutoApplied = false, oldConfidence = currentConfidence))
+            addChatMessage(ChatEntry.IntelReport(newResult, wasAutoApplied = true, oldAccuracy = currentAccuracy))
         } else {
-            addChatMessage(ChatEntry.IntelReport(newResult, wasAutoApplied = false, oldConfidence = currentConfidence))
+            // Wait for manual update via "Update Details" button
+            addChatMessage(ChatEntry.IntelReport(newResult, wasAutoApplied = false, oldAccuracy = currentAccuracy))
         }
     }
 
     fun applyPendingIntelUpdate() {
         val pending = _pendingIntelResult.value ?: return
         viewModelScope.launch {
-            applyInvestigationResult(pending.phoneNumber, pending)
-            _selectedNumberIntel.value = pending
+            // Respect manual label if it was already set by user
+            val current = dao.getLookupResult(pending.phoneNumber)
+            val finalResult = if (current?.manualLabel != null) {
+                pending.copy(manualLabel = current.manualLabel)
+            } else {
+                pending
+            }
+            
+            applyInvestigationResult(pending.phoneNumber, finalResult)
+            _selectedNumberIntel.value = finalResult
             _pendingIntelResult.value = null
         }
     }
 
-    private fun isDataDifferent(new: PhoneLookupResult, old: PhoneLookupResult?): Boolean {
-        if (old == null) return true
+    fun isDataDifferent(new: PhoneLookupResult?, old: PhoneLookupResult?): Boolean {
+        if (new == null || old == null) return new != old
         return new.ownerName != old.ownerName ||
                new.companyName != old.companyName ||
                new.category != old.category ||
                new.spam != old.spam ||
                new.scam != old.scam ||
                new.debtCollector != old.debtCollector ||
-               new.telemarketer != old.telemarketer
+               new.telemarketer != old.telemarketer ||
+               new.manualLabel != old.manualLabel ||
+               new.accuracy != old.accuracy
     }
 
     fun refineInvestigation(number: String) {
@@ -237,11 +248,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             try {
                 val result = getLookupDeepService().lookupDeep(number)
                 if (result != null) {
-                    val oldConfidence = dao.getLookupResult(number)?.confidence ?: -1.0
-                    if ((result.confidence ?: 0.0) > oldConfidence) {
+                    val current = dao.getLookupResult(number)
+                    val oldAcc = current?.accuracy ?: -1
+                    if (result.accuracy > oldAcc) {
                         applyInvestigationResult(number, result); _selectedNumberIntel.value = result
-                        addChatMessage(ChatEntry.IntelReport(result, wasAutoApplied = true, oldConfidence = oldConfidence))
-                    } else addChatMessage(ChatEntry.IntelReport(result, wasAutoApplied = false, oldConfidence = oldConfidence))
+                        addChatMessage(ChatEntry.IntelReport(result, wasAutoApplied = true, oldAccuracy = oldAcc))
+                    } else addChatMessage(ChatEntry.IntelReport(result, wasAutoApplied = false, oldAccuracy = oldAcc))
                 }
             } catch (e: Exception) { } finally { _isIdentifying.value = false; _foregroundNumber.value = null }
         }
@@ -261,10 +273,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     _bulkProgress.value = (index + 1).toFloat() / total
                     val result = getLookupService().lookup(setOf(number), forceRefresh = false)
                     if (result != null && !result.isCached) {
-                        _bulkNumber.value = number; val oldConfidence = dao.getLookupResult(number)?.confidence ?: -1.0
-                        if ((result.confidence ?: 0.0) > oldConfidence) {
-                            applyInvestigationResult(number, result); addChatMessage(ChatEntry.IntelReport(result, wasAutoApplied = true, oldConfidence = oldConfidence))
-                        } else addChatMessage(ChatEntry.IntelReport(result, wasAutoApplied = false, oldConfidence = oldConfidence))
+                        _bulkNumber.value = number
+                        val current = dao.getLookupResult(number)
+                        val oldAcc = current?.accuracy ?: -1
+                        if (result.accuracy > oldAcc) {
+                            applyInvestigationResult(number, result); addChatMessage(ChatEntry.IntelReport(result, wasAutoApplied = true, oldAccuracy = oldAcc))
+                        } else addChatMessage(ChatEntry.IntelReport(result, wasAutoApplied = false, oldAccuracy = oldAcc))
                     }
                     delay(500)
                 }
@@ -276,17 +290,25 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val normalized = PhoneHelper.normalizeToE164(number)
         dao.insertLookupResult(result)
         
-        val bestName = result.companyName ?: result.ownerName ?: "Unknown"
+        // Label Priority: Manual -> Company -> Person -> Risk Status -> Unknown
+        val bestName = result.manualLabel 
+            ?: result.companyName 
+            ?: result.ownerName 
+            ?: when {
+                result.scam -> "Confirmed Scam"
+                result.spam -> "Potential Spam"
+                result.debtCollector -> "Debt Collector"
+                result.telemarketer -> "Telemarketer"
+                else -> "Unknown"
+            }
         
-        // Update all existing tiles in the call log for this number
         val formattedInfo = buildString {
             append("Risk: ${if (result.scam) "HIGH" else if (result.spam) "MEDIUM" else "LOW"} • ")
-            append("Acc: ${(result.confidence?.times(100))?.toInt()}% • ")
+            append("Accuracy: ${result.accuracy}% • ")
             append(result.summary?.take(60))
         }
         dao.updateCallLogByNumber(normalized, bestName, result.ownerName, result.companyName, formattedInfo)
         
-        // Also update blacklist/whitelist labels if they exist
         dao.updateBlacklistLabelByNumber(normalized, bestName)
         dao.updateWhitelistLabelByNumber(normalized, bestName)
 
@@ -421,7 +443,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun updateAiRealTimeBlocking(e: Boolean) { viewModelScope.launch { settingsRepo.updateAiRealTimeBlocking(e) } }
     fun updateBlockDebtCollectors(e: Boolean) { viewModelScope.launch { settingsRepo.updateBlockDebtCollectors(e) } }
     fun updateBlockTelemarketers(e: Boolean) { viewModelScope.launch { settingsRepo.updateBlockTelemarketers(e) } }
-    fun updateAiBlockingConfidence(c: Int) { viewModelScope.launch { settingsRepo.updateAiBlockingConfidence(c) } }
+    fun updateAiBlockingAccuracy(c: Int) { viewModelScope.launch { settingsRepo.updateAiBlockingAccuracy(c) } }
     fun updateWhitelistEnabled(e: Boolean) { viewModelScope.launch { settingsRepo.updateWhitelistEnabled(e) } }
     fun updateBlacklistEnabled(e: Boolean) { viewModelScope.launch { settingsRepo.updateBlacklistEnabled(e) } }
     fun updateSelectedModel(m: String) { viewModelScope.launch { settingsRepo.updateSelectedGeminiModel(m) } }
@@ -460,7 +482,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private fun getLookupService() = GeminiPhoneLookupService(getApplication(), CryptoManager.getGeminiApiKey(getApplication()) ?: "", settings.value.selectedGeminiModel, dao)
     private fun getLookupDeepService() = GeminiPhoneLookupService(getApplication(), CryptoManager.getGeminiApiKey(getApplication()) ?: "", settings.value.selectedGeminiModel, dao)
 
-    fun fetchIntelForNumber(number: String) { viewModelScope.launch { _selectedNumberIntel.value = dao.getLookupResult(number) } }
+    fun fetchIntelForNumber(number: String) { 
+        viewModelScope.launch { 
+            _pendingIntelResult.value = null // Clear old scan when viewing new number
+            _selectedNumberIntel.value = dao.getLookupResult(number) 
+        } 
+    }
     fun addToWhitelist(number: String, label: String?) { viewModelScope.launch { val n = PhoneHelper.normalizeToE164(number); if (n.isNotBlank()) dao.insertWhitelistEntry(WhitelistEntry(number = n, label = label ?: "Manual")) } }
     fun addToBlacklist(number: String, label: String?) { viewModelScope.launch { val n = PhoneHelper.normalizeToE164(number); if (n.isNotBlank()) dao.insertBlacklistEntry(BlacklistEntry(pattern = n, label = label ?: "Manual")) } }
     fun updateFullNumberDetails(old: String, updated: PhoneLookupResult, label: String?) { viewModelScope.launch { dao.insertLookupResult(updated); _selectedNumberIntel.value = updated } }

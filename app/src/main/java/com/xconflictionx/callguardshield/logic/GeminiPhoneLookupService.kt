@@ -108,10 +108,16 @@ class GeminiPhoneLookupService(
         You are a highly accurate phone number intelligence expert. 
         Your goal is to identify caller owners and reputations with zero hallucinations.
         
+        CRITICAL RULES:
+        - Do NOT guess or hallucinate names.
+        - If you are not 100% certain of the owner/company name based on your data, return null.
+        - NEVER default to common names like 'Bank of America', 'Telemarketer', or 'Spam' unless you have specific data for THIS exact number.
+        - Accuracy scores must be honest. If uncertain, accuracy must be < 10.
+        
         STRICT OUTPUT FORMAT:
         - Return ONLY a single JSON object.
-        - 'ownerName' and 'companyName' MUST contain ONLY the verified names. 
-        - If unknown, use null.
+        - 'ownerName' and 'companyName' MUST contain ONLY verified names or null.
+        - 'accuracy' MUST be a whole number between 0 and 100.
         - 'evidence' MUST be a list of simple text strings.
         - 'sources' MUST be a list of simple text strings.
     """.trimIndent()
@@ -129,11 +135,11 @@ class GeminiPhoneLookupService(
 
         // Fast Scan (No search) -> Deep Scan (Search) fallback for default lookup
         StatusManager.setGeminiStage("Fast Scan (High Speed)")
-        val prompt = "Identify identity/reputation for: $number. Output JSON: ownerName, companyName, category, confidence (0-1), summary, spam (bool), scam (bool), evidence (list), sources (list)."
+        val prompt = "Identify identity/reputation for: $number. Output JSON: ownerName, companyName, category, accuracy (0-100), summary, spam (bool), scam (bool), evidence (list), sources (list)."
         
         var result = executeSingleModelRequest(prompt, number, searchMode = false)
         
-        if (result == null || (result.confidence ?: 0.0) < 0.85) {
+        if (result == null || result.accuracy < 85) {
             StatusManager.setGeminiStage("Deep Scan (Web Research)")
             result = executeSingleModelRequest(prompt, number, searchMode = true)
         }
@@ -144,7 +150,7 @@ class GeminiPhoneLookupService(
 
     suspend fun lookupFast(number: String): PhoneLookupResult? = withContext(Dispatchers.IO) {
         StatusManager.setGeminiStage("Fast Scan (High Speed)")
-        val prompt = "Identify identity/reputation for: $number. Output JSON: ownerName, companyName, category, confidence (0-1), summary, spam (bool), scam (bool), evidence (list), sources (list)."
+        val prompt = "Identify identity/reputation for: $number. Output JSON: ownerName, companyName, category, accuracy (0-100), summary, spam (bool), scam (bool), evidence (list), sources (list)."
         val result = executeSingleModelRequest(prompt, number, searchMode = false)
         if (result != null) dao.insertLookupResult(result)
         result
@@ -152,13 +158,13 @@ class GeminiPhoneLookupService(
 
     suspend fun lookupDeep(number: String): PhoneLookupResult? = withContext(Dispatchers.IO) {
         StatusManager.setGeminiStage("Deep Scan (Web Research)")
-        val prompt = "CRITICAL DEEP SEARCH: $number. Output JSON: ownerName, companyName, category, confidence, summary, spam, scam, evidence, sources."
+        val prompt = "CRITICAL DEEP SEARCH: $number. Output JSON: ownerName, companyName, category, accuracy (0-100), summary, spam, scam, evidence, sources."
         executeSingleModelRequest(prompt, number, searchMode = true)
     }
 
     suspend fun lookupThorough(number: String): PhoneLookupResult? = withContext(Dispatchers.IO) {
         val results = mutableListOf<PhoneLookupResult>()
-        val prompt = "THOROUGH INVESTIGATION: $number. Output JSON: ownerName, companyName, category, confidence, summary, spam, scam, evidence, sources."
+        val prompt = "THOROUGH INVESTIGATION: $number. Output JSON: ownerName, companyName, category, accuracy (0-100), summary, spam, scam, evidence, sources."
         
         repeat(3) { i ->
             StatusManager.setGeminiStage("Thorough Scan (Stage ${i + 1}/3)")
@@ -168,8 +174,8 @@ class GeminiPhoneLookupService(
         
         if (results.isEmpty()) return@withContext null
         
-        // Pick the one with highest confidence
-        val best = results.maxByOrNull { it.confidence ?: 0.0 }
+        // Pick the one with highest accuracy
+        val best = results.maxByOrNull { it.accuracy }
         if (best != null) {
             dao.insertLookupResult(best)
         }
@@ -180,8 +186,12 @@ class GeminiPhoneLookupService(
         val cached = dao.getLookupResult(number)
         if (cached != null) return@withContext cached.copy(isCached = true)
         
-        val prompt = "Real-time Identify: $number. Output JSON (ownerName, companyName, confidence, summary, spam, scam, debtCollector, telemarketer)."
-        executeSingleModelRequest(prompt, number, searchMode = false)
+        val prompt = "Real-time Identify: $number. Output JSON (ownerName, companyName, accuracy (0-100), summary, spam, scam, debtCollector, telemarketer)."
+        val result = executeSingleModelRequest(prompt, number, searchMode = false)
+        if (result != null) {
+            dao.insertLookupResult(result)
+        }
+        result
     }
 
     private suspend fun executeSingleModelRequest(prompt: String, number: String, searchMode: Boolean): PhoneLookupResult? {
@@ -202,13 +212,27 @@ class GeminiPhoneLookupService(
                 val json = response.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text ?: continue
                 val cleanJson = json.trim().removePrefix("```json").removeSuffix("```").trim()
                 
-                val result = try {
-                    Gson().fromJson(cleanJson, PhoneLookupResult::class.java)
-                } catch (e: Exception) {
-                    null
-                } ?: continue
+                // Parsing logic to handle whole numbers (0-100) vs decimals (0.0-1.0)
+                val gson = Gson()
+                val map = gson.fromJson(cleanJson, Map::class.java)
+                
+                // Extract accuracy/confidence field
+                val rawAcc = map["accuracy"] ?: map["confidence"] ?: 0.0
+                val parsedAcc = when (rawAcc) {
+                    is Number -> {
+                        val v = rawAcc.toDouble()
+                        if (v <= 1.0 && v > 0) (v * 100).toInt() else v.toInt()
+                    }
+                    else -> 0
+                }.coerceIn(0, 100)
 
-                return result.copy(phoneNumber = number, lookupDate = System.currentTimeMillis())
+                val result = gson.fromJson(cleanJson, PhoneLookupResult::class.java)
+
+                return result.copy(
+                    phoneNumber = number, 
+                    accuracy = parsedAcc,
+                    lookupDate = System.currentTimeMillis()
+                )
 
             } catch (e: Exception) {
                 val code = (e as? HttpException)?.code()
@@ -222,8 +246,24 @@ class GeminiPhoneLookupService(
                         val retryResponse = api.generateContent(url, request)
                         val retryJson = retryResponse.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text ?: continue
                         val retryCleanJson = retryJson.trim().removePrefix("```json").removeSuffix("```").trim()
-                        val retryResult = Gson().fromJson(retryCleanJson, PhoneLookupResult::class.java)
-                        return retryResult.copy(phoneNumber = number, lookupDate = System.currentTimeMillis())
+                        
+                        val gson = Gson()
+                        val map = gson.fromJson(retryCleanJson, Map::class.java)
+                        val rawAcc = map["accuracy"] ?: map["confidence"] ?: 0.0
+                        val parsedAcc = when (rawAcc) {
+                            is Number -> {
+                                val v = rawAcc.toDouble()
+                                if (v <= 1.0 && v > 0) (v * 100).toInt() else v.toInt()
+                            }
+                            else -> 0
+                        }.coerceIn(0, 100)
+
+                        val retryResult = gson.fromJson(retryCleanJson, PhoneLookupResult::class.java)
+                        return retryResult.copy(
+                            phoneNumber = number, 
+                            accuracy = parsedAcc,
+                            lookupDate = System.currentTimeMillis()
+                        )
                     } catch (re: Exception) {
                         break 
                     }

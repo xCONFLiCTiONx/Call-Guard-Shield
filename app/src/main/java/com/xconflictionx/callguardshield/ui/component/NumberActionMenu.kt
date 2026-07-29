@@ -3,14 +3,7 @@ package com.xconflictionx.callguardshield.ui.component
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Block
-import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.ContentCopy
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.PersonAdd
-import androidx.compose.material.icons.filled.Phone
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -20,10 +13,12 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.xconflictionx.callguardshield.data.entity.PhoneLookupResult
+import com.xconflictionx.callguardshield.ui.MainViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun NumberActionMenu(
+    viewModel: MainViewModel,
     number: String,
     label: String? = null,
     intelResult: PhoneLookupResult? = null,
@@ -39,6 +34,8 @@ fun NumberActionMenu(
 ) {
     val clipboardManager = LocalClipboardManager.current
     var showLabelDialog by remember { mutableStateOf<LabelDialogType?>(null) }
+    
+    val pendingResult by viewModel.pendingIntelResult.collectAsState()
 
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(
@@ -65,6 +62,7 @@ fun NumberActionMenu(
             // Action Items
             ListItem(
                 headlineContent = { Text("Identify Caller") },
+                supportingContent = { Text("Triggers a Fast Scan for immediate results.") },
                 leadingContent = { Icon(Icons.Default.Search, contentDescription = null) },
                 modifier = Modifier.clickable { 
                     onIdentify()
@@ -81,16 +79,41 @@ fun NumberActionMenu(
                 }
             )
 
-            if (onEditLabel != null) {
-                ListItem(
-                    headlineContent = { Text("Edit Label") },
-                    leadingContent = { Icon(Icons.Default.Edit, contentDescription = null) },
-                    modifier = Modifier.clickable { 
-                        onEditLabel()
-                        onDismiss()
-                    }
-                )
-            }
+            ListItem(
+                headlineContent = { Text("Edit Details") },
+                supportingContent = { Text("Manually set the label and risk level.") },
+                leadingContent = { Icon(Icons.Default.Edit, contentDescription = null) },
+                modifier = Modifier.clickable { 
+                    onEditLabel?.invoke()
+                    onDismiss()
+                }
+            )
+
+            // Update Details Button (Always Visible)
+            val isDifferent = viewModel.isDataDifferent(pendingResult, intelResult)
+            ListItem(
+                headlineContent = { 
+                    Text(
+                        text = if (pendingResult == null) "No scan results available"
+                               else if (isDifferent) "Update Saved Details" 
+                               else "Information is up-to-date",
+                        fontWeight = FontWeight.Bold,
+                        color = if (pendingResult != null && isDifferent) MaterialTheme.colorScheme.primary else Color.Gray
+                    ) 
+                },
+                supportingContent = { Text("Apply the latest Gemini research to this number.") },
+                leadingContent = { 
+                    Icon(
+                        Icons.Default.CloudUpload, 
+                        contentDescription = null,
+                        tint = if (pendingResult != null && isDifferent) MaterialTheme.colorScheme.primary else Color.Gray
+                    ) 
+                },
+                modifier = Modifier.clickable(enabled = pendingResult != null && isDifferent) {
+                    viewModel.applyPendingIntelUpdate()
+                    onDismiss()
+                }
+            )
 
             ListItem(
                 headlineContent = { Text(removeLabel, color = MaterialTheme.colorScheme.error) },
@@ -137,7 +160,7 @@ fun NumberActionMenu(
                 }
             )
 
-            // Gemini Intelligence Details Section
+            // Gemini Intelligence Details Section (Summary View)
             if (intelResult != null) {
                 HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp), color = MaterialTheme.colorScheme.primary.copy(alpha = 0.3f))
                 
@@ -145,109 +168,17 @@ fun NumberActionMenu(
                     modifier = Modifier.padding(16.dp)
                 ) {
                     Text(
-                        text = "Gemini Intelligence Details",
+                        text = "Current Saved Intelligence",
                         style = MaterialTheme.typography.titleSmall,
                         color = MaterialTheme.colorScheme.primary,
                         fontWeight = FontWeight.Bold
                     )
                     Spacer(modifier = Modifier.height(8.dp))
 
-                    // Owner/Company
                     val displayName = intelResult.companyName ?: intelResult.ownerName ?: "Unknown"
                     DetailRow("Name", displayName)
-                    
-                    // Category
                     DetailRow("Category", intelResult.category ?: "Unknown")
-                    
-                    // Confidence
-                    val confidenceText = intelResult.confidence?.let { "${(it * 100).toInt()}%" } ?: "N/A"
-                    DetailRow("Confidence", confidenceText)
-                    
-                    // Risk Assessment
-                    val risk = when {
-                        intelResult.scam -> "HIGH - Scam"
-                        intelResult.spam -> "MEDIUM - Spam"
-                        else -> "LOW - Legitimate"
-                    }
-                    DetailRow("Risk Level", risk)
-                    
-                    // Flags
-                    val flags = buildList {
-                        if (intelResult.debtCollector) add("Debt Collector")
-                        if (intelResult.telemarketer) add("Telemarketer")
-                    }
-                    if (flags.isNotEmpty()) {
-                        DetailRow("Flags", flags.joinToString(", "))
-                    }
-
-                    // Summary
-                    intelResult.summary?.let {
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = "Summary",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.primary,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Surface(
-                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                            shape = MaterialTheme.shapes.small
-                        ) {
-                            Text(
-                                text = it,
-                                modifier = Modifier.padding(8.dp),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-
-                    // Evidence
-                    intelResult.evidence?.takeIf { it.isNotEmpty() }?.let { evidenceList ->
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = "Evidence",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.primary,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Spacer(modifier = Modifier.height(4.dp))
-                        evidenceList.forEach { evidence ->
-                            Text(
-                                text = "• $evidence",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.padding(start = 8.dp, top = 2.dp)
-                            )
-                        }
-                    }
-
-                    // Sources
-                    intelResult.sources?.takeIf { it.isNotEmpty() }?.let { sourceList ->
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = "Sources",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.primary,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Spacer(modifier = Modifier.height(4.dp))
-                        sourceList.forEach { source ->
-                            Text(
-                                text = "• $source",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.padding(start = 8.dp, top = 2.dp)
-                            )
-                        }
-                    }
-
-                    // Last Verified
-                    intelResult.lastVerified?.let {
-                        Spacer(modifier = Modifier.height(8.dp))
-                        DetailRow("Last Verified", it)
-                    }
+                    DetailRow("Accuracy", "${intelResult.accuracy}%")
                 }
             }
         }

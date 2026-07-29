@@ -7,7 +7,7 @@ sealed class ChatEntry {
     data class IntelReport(
         val result: PhoneLookupResult, 
         val wasAutoApplied: Boolean = true,
-        val oldConfidence: Double? = null
+        val oldAccuracy: Int? = null
     ) : ChatEntry()
     data class ErrorMessage(val text: String) : ChatEntry()
 }

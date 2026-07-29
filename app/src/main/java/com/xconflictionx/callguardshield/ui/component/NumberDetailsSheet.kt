@@ -69,17 +69,6 @@ fun NumberDetailsSheet(
                 }
                 
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    IconButton(
-                        onClick = onIdentify,
-                        enabled = !isThisNumberIdentifying
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.AutoAwesome, 
-                            contentDescription = "Fast Scan",
-                            tint = if (isThisNumberIdentifying) Color.Gray else MaterialTheme.colorScheme.primary
-                        )
-                    }
-                    Spacer(modifier = Modifier.width(4.dp))
                     FilledTonalIconButton(onClick = onOpenSettings) {
                         Icon(Icons.Default.Settings, contentDescription = "Number Settings")
                     }
@@ -110,24 +99,51 @@ fun NumberDetailsSheet(
                     .padding(horizontal = 16.dp)
                     .verticalScroll(rememberScrollState())
             ) {
+                // Proposed Update Section (Comparison)
+                if (pendingResult != null && viewModel.isDataDifferent(pendingResult, intelResult)) {
+                    Surface(
+                        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f),
+                        shape = MaterialTheme.shapes.medium,
+                        modifier = Modifier.padding(vertical = 8.dp)
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.NewReleases, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Proposed Update", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                            }
+                            Spacer(modifier = Modifier.height(8.dp))
+                            
+                            val pName = pendingResult?.manualLabel ?: pendingResult?.companyName ?: pendingResult?.ownerName ?: "Unknown"
+                            val pAcc = "${pendingResult?.accuracy ?: 0}%"
+                            val pRisk = if (pendingResult?.scam == true) "High" else if (pendingResult?.spam == true) "Medium" else "Low"
+                            
+                            Text("Gemini found new information:", style = MaterialTheme.typography.bodySmall)
+                            Text("• Name: $pName", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
+                            Text("• Accuracy: $pAcc", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
+                            Text("• Risk: $pRisk", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+
                 if (intelResult != null) {
                     HorizontalDivider(color = MaterialTheme.colorScheme.primary.copy(alpha = 0.3f))
                     Spacer(modifier = Modifier.height(12.dp))
 
                     Text(
-                        text = "Gemini Intelligence Details",
+                        text = "Current Saved Details",
                         style = MaterialTheme.typography.titleSmall,
                         color = MaterialTheme.colorScheme.primary,
                         fontWeight = FontWeight.Bold
                     )
                     Spacer(modifier = Modifier.height(12.dp))
 
-                    val displayName = intelResult.companyName ?: intelResult.ownerName ?: "Unknown"
+                    val displayName = intelResult.manualLabel ?: intelResult.companyName ?: intelResult.ownerName ?: "Unknown"
                     DetailRow("Name", displayName)
                     DetailRow("Category", intelResult.category ?: "Unknown")
                     
-                    val confidenceText = intelResult.confidence?.let { "${(it * 100).toInt()}%" } ?: "N/A"
-                    DetailRow("Confidence", confidenceText)
+                    val accuracyText = "${intelResult.accuracy}%"
+                    DetailRow("Accuracy", accuracyText)
 
                     val risk = when {
                         intelResult.scam -> "HIGH - Scam Alert!"
@@ -157,22 +173,6 @@ fun NumberDetailsSheet(
                         }
                     }
 
-                    intelResult.evidence?.takeIf { it.isNotEmpty() }?.let { evidenceList ->
-                        Spacer(modifier = Modifier.height(12.dp))
-                        Text("Evidence", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
-                        evidenceList.forEach { evidence ->
-                            Text("• $evidence", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(start = 8.dp, top = 2.dp))
-                        }
-                    }
-
-                    intelResult.sources?.takeIf { it.isNotEmpty() }?.let { sourceList ->
-                        Spacer(modifier = Modifier.height(12.dp))
-                        Text("Sources", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
-                        sourceList.forEach { source ->
-                            Text("• $source", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(start = 8.dp, top = 2.dp))
-                        }
-                    }
-
                     if (intelResult.isCached) {
                         Spacer(modifier = Modifier.height(12.dp))
                         Text("📦 Cached result", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
@@ -189,19 +189,26 @@ fun NumberDetailsSheet(
                     .padding(16.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                if (pendingResult != null) {
-                    Button(
-                        onClick = { viewModel.applyPendingIntelUpdate() },
-                        modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = MaterialTheme.colorScheme.primaryContainer,
-                            contentColor = MaterialTheme.colorScheme.onPrimaryContainer
-                        )
-                    ) {
-                        Icon(Icons.Default.CloudUpload, contentDescription = null)
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("Update Details")
-                    }
+                // Persistent Update Details Button
+                val isDifferent = viewModel.isDataDifferent(pendingResult, intelResult)
+                Button(
+                    onClick = { viewModel.applyPendingIntelUpdate() },
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                    enabled = pendingResult != null && isDifferent,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.primaryContainer,
+                        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                        disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                        disabledContentColor = Color.Gray
+                    )
+                ) {
+                    Icon(Icons.Default.CloudUpload, contentDescription = null)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        if (pendingResult == null) "No scan results yet"
+                        else if (isDifferent) "Update Saved Details" 
+                        else "Information matches current records"
+                    )
                 }
 
                 Button(

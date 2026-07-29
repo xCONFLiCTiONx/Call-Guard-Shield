@@ -20,11 +20,12 @@ fun EditNumberDetailsDialog(
     onConfirm: (String, PhoneLookupResult) -> Unit
 ) {
     var currentNumber by remember { mutableStateOf(number) }
+    var manualLabel by remember { mutableStateOf(initialIntel?.manualLabel ?: "") }
     var ownerName by remember { mutableStateOf(initialIntel?.ownerName ?: "") }
     var companyName by remember { mutableStateOf(initialIntel?.companyName ?: "") }
     var category by remember { mutableStateOf(initialIntel?.category ?: "Unknown") }
     var summary by remember { mutableStateOf(initialIntel?.summary ?: "") }
-    var confidence by remember { mutableStateOf(initialIntel?.confidence?.toString() ?: "0.8") }
+    var accuracy by remember { mutableStateOf(initialIntel?.accuracy?.toString() ?: "80") }
     
     var isSpam by remember { mutableStateOf(initialIntel?.spam ?: false) }
     var isScam by remember { mutableStateOf(initialIntel?.scam ?: false) }
@@ -45,7 +46,7 @@ fun EditNumberDetailsDialog(
         ) {
             Column(modifier = Modifier.padding(24.dp)) {
                 Text(
-                    text = "Edit Entry",
+                    text = "Edit Details",
                     style = MaterialTheme.typography.headlineSmall,
                     color = MaterialTheme.colorScheme.primary
                 )
@@ -56,6 +57,13 @@ fun EditNumberDetailsDialog(
                     modifier = Modifier.weight(1f).verticalScroll(rememberScrollState()),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
+                    OutlinedTextField(
+                        value = manualLabel,
+                        onValueChange = { manualLabel = it },
+                        label = { Text("Display Label (Manual Override)") },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
                     OutlinedTextField(
                         value = currentNumber,
                         onValueChange = { currentNumber = it },
@@ -87,9 +95,9 @@ fun EditNumberDetailsDialog(
                     )
 
                     OutlinedTextField(
-                        value = confidence,
-                        onValueChange = { confidence = it },
-                        label = { Text("Confidence (0.0 to 1.0)") },
+                        value = accuracy,
+                        onValueChange = { accuracy = it },
+                        label = { Text("Accuracy (0.0 to 1.0)") },
                         modifier = Modifier.fillMaxWidth()
                     )
 
@@ -138,10 +146,13 @@ fun EditNumberDetailsDialog(
                     Button(onClick = {
                         val result = PhoneLookupResult(
                             phoneNumber = currentNumber,
+                            manualLabel = manualLabel.ifBlank { null },
                             ownerName = ownerName.ifBlank { null },
                             companyName = companyName.ifBlank { null },
                             category = category.ifBlank { "Unknown" },
-                            confidence = confidence.toDoubleOrNull() ?: 0.5,
+                            accuracy = accuracy.toDoubleOrNull()?.let { 
+                                if (it <= 1.0 && it > 0) (it * 100).toInt() else it.toInt()
+                            }?.coerceIn(0, 100) ?: 0,
                             spam = isSpam,
                             scam = isScam,
                             debtCollector = isDebt,
@@ -154,7 +165,7 @@ fun EditNumberDetailsDialog(
                         )
                         onConfirm(number, result) // Pass original number and new data
                     }) {
-                        Text("Save Changes")
+                        Text("Save Details")
                     }
                 }
             }
