@@ -18,12 +18,11 @@ import com.xconflictionx.callguardshield.ui.MainViewModel
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun NumberActionMenu(
-    viewModel: MainViewModel,
     number: String,
     label: String? = null,
     intelResult: PhoneLookupResult? = null,
     onDismiss: () -> Unit,
-    onIdentify: () -> Unit,
+    onOpenScanner: () -> Unit,
     onAddToWhitelist: (String?) -> Unit,
     onAddToBlacklist: (String?) -> Unit,
     onRemoveFromList: () -> Unit,
@@ -35,7 +34,6 @@ fun NumberActionMenu(
     val clipboardManager = LocalClipboardManager.current
     var showLabelDialog by remember { mutableStateOf<LabelDialogType?>(null) }
     
-    val pendingResult by viewModel.pendingIntelResult.collectAsState()
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
     ModalBottomSheet(
@@ -65,13 +63,13 @@ fun NumberActionMenu(
                 )
             }
 
-            // Action Items
+            // Standard Actions
             ListItem(
-                headlineContent = { Text("Identify Caller") },
-                supportingContent = { Text("Triggers a Fast Scan for immediate results.") },
-                leadingContent = { Icon(Icons.Default.Search, contentDescription = null) },
+                headlineContent = { Text("Look up number with AI") },
+                supportingContent = { Text("Research identity and reputation with Gemini.") },
+                leadingContent = { Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
                 modifier = Modifier.clickable { 
-                    onIdentify()
+                    onOpenScanner()
                     onDismiss()
                 }
             )
@@ -91,32 +89,6 @@ fun NumberActionMenu(
                 leadingContent = { Icon(Icons.Default.Edit, contentDescription = null) },
                 modifier = Modifier.clickable { 
                     onEditLabel?.invoke()
-                    onDismiss()
-                }
-            )
-
-            // Update Details Button (Always Visible)
-            val isDifferent = viewModel.isDataDifferent(pendingResult, intelResult)
-            ListItem(
-                headlineContent = { 
-                    Text(
-                        text = if (pendingResult == null) "No scan results available"
-                               else if (isDifferent) "Update Saved Details" 
-                               else "Information is up-to-date",
-                        fontWeight = FontWeight.Bold,
-                        color = if (pendingResult != null && isDifferent) MaterialTheme.colorScheme.primary else Color.Gray
-                    ) 
-                },
-                supportingContent = { Text("Apply the latest Gemini research to this number.") },
-                leadingContent = { 
-                    Icon(
-                        Icons.Default.CloudUpload, 
-                        contentDescription = null,
-                        tint = if (pendingResult != null && isDifferent) MaterialTheme.colorScheme.primary else Color.Gray
-                    ) 
-                },
-                modifier = Modifier.clickable(enabled = pendingResult != null && isDifferent) {
-                    viewModel.applyPendingIntelUpdate()
                     onDismiss()
                 }
             )
@@ -191,7 +163,7 @@ fun NumberActionMenu(
     }
 
     if (showLabelDialog != null) {
-        var labelInput by remember { mutableStateOf(label ?: "") }
+        var labelInput by remember { mutableStateOf(if (label == number) "" else (label ?: "")) }
         AlertDialog(
             onDismissRequest = { showLabelDialog = null },
             title = { Text("Add Label") },

@@ -84,7 +84,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         return numbers.map { num ->
             val intel = cache.find { it.phoneNumber == num }
             val stat = stats.find { it.number == num }
-            val inBl = bl.any { it.pattern == num }
+            val inBl = bl.any { num.startsWith(it.pattern.removeSuffix("%")) }
             val inWl = wl.any { it.number == num }
             val rawLabel = labels[num]
             
@@ -284,10 +284,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _pendingIntelResult.value = newResult
 
         // Auto-save logic: ONLY if new accuracy is higher AND there is no manual override label
+        // However, we still keep it in pendingResult so the "Update" button can be shown if needed
         if (newAccuracy > currentAccuracy && currentResult?.manualLabel == null) {
             applyInvestigationResult(number, newResult)
             _selectedNumberIntel.value = newResult
-            _pendingIntelResult.value = null // Clear pending if auto-saved
         }
     }
 
@@ -547,8 +547,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch { 
             val n = PhoneHelper.normalizeToE164(number)
             if (n.isNotBlank()) {
+                val inheritedLabel = label ?: dao.getLookupResult(n)?.let { it.manualLabel ?: it.companyName ?: it.ownerName }
                 dao.deleteBlacklistByPattern(n) // List Exclusivity
-                dao.insertWhitelistEntry(WhitelistEntry(number = n, label = label ?: "Manual")) 
+                dao.insertWhitelistEntry(WhitelistEntry(number = n, label = inheritedLabel)) 
             }
         } 
     }
@@ -556,8 +557,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch { 
             val n = PhoneHelper.normalizeToE164(number)
             if (n.isNotBlank()) {
+                val inheritedLabel = label ?: dao.getLookupResult(n)?.let { it.manualLabel ?: it.companyName ?: it.ownerName }
                 dao.deleteWhitelistByNumber(n) // List Exclusivity
-                dao.insertBlacklistEntry(BlacklistEntry(pattern = n, label = label ?: "Manual")) 
+                dao.insertBlacklistEntry(BlacklistEntry(pattern = n, label = inheritedLabel)) 
             }
         } 
     }

@@ -249,36 +249,37 @@ fun BlacklistTab(
     selectedNumberIntel: com.xconflictionx.callguardshield.data.entity.PhoneLookupResult? = null,
     foregroundNumber: String? = null
 ) {
-    val blacklist by viewModel.blacklistFull.collectAsState()
+    val blacklistFull by viewModel.blacklistFull.collectAsState()
     var selectedIndex by remember { mutableIntStateOf(-1) }
     var showSettings by remember { mutableStateOf(false) }
     var showDetailsEditor by remember { mutableStateOf(false) }
+    var isScannerMode by remember { mutableStateOf(false) }
     val context = LocalContext.current
 
-    val selectedEntry = if (selectedIndex in blacklist.indices) blacklist[selectedIndex] else null
+    val selectedEntry = if (selectedIndex in blacklistFull.indices) blacklistFull[selectedIndex] else null
 
     Scaffold { padding ->
         Box(modifier = Modifier.padding(padding)) {
-            if (blacklist.isEmpty()) {
+            if (blacklistFull.isEmpty()) {
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Text("Blacklist is empty.", color = Color.Gray)
                 }
             }
 
             LazyColumn(modifier = Modifier.fillMaxSize()) {
-                itemsIndexed(blacklist) { index, entry ->
-                    val intel = entry.intel
+                itemsIndexed(blacklistFull) { index, entry ->
                     NumberItemCard(
                         headline = entry.headline,
                         subhead = if (entry.headline != entry.number) entry.number else null,
-                        ownerName = intel?.ownerName,
-                        companyName = intel?.companyName,
+                        ownerName = entry.intel?.ownerName,
+                        companyName = entry.intel?.companyName,
                         isBlocked = true,
                         callerInfo = entry.formattedInfo,
                         onClick = { 
                             selectedIndex = index
                             showSettings = false
                             showDetailsEditor = false
+                            isScannerMode = false
                             viewModel.fetchIntelForNumber(entry.number)
                         },
                         actionSlot = {
@@ -300,7 +301,7 @@ fun BlacklistTab(
                 }
             }
 
-            // Show Details Sheet first (primary view)
+            // Show Details Sheet
             if (!showSettings && !showDetailsEditor && selectedEntry != null) {
                 NumberDetailsSheet(
                     viewModel = viewModel,
@@ -308,42 +309,40 @@ fun BlacklistTab(
                     label = selectedEntry.headline,
                     intelResult = selectedNumberIntel,
                     isThisNumberIdentifying = foregroundNumber == selectedEntry.number,
+                    isScannerMode = isScannerMode,
                     onDismiss = { selectedIndex = -1 },
                     onOpenSettings = { showSettings = true },
-                    onIdentify = {
-                        viewModel.performInvestigation(selectedEntry.number)
-                    },
                     onNavigatePrevious = if (selectedIndex > 0) {
                         {
                             selectedIndex--
-                            viewModel.fetchIntelForNumber(blacklist[selectedIndex].number)
+                            isScannerMode = false
+                            viewModel.fetchIntelForNumber(blacklistFull[selectedIndex].number)
                         }
                     } else null,
-                    onNavigateNext = if (selectedIndex < blacklist.size - 1) {
+                    onNavigateNext = if (selectedIndex < blacklistFull.size - 1) {
                         {
                             selectedIndex++
-                            viewModel.fetchIntelForNumber(blacklist[selectedIndex].number)
+                            isScannerMode = false
+                            viewModel.fetchIntelForNumber(blacklistFull[selectedIndex].number)
                         }
                     } else null
                 )
             }
 
-            // Show Settings/Actions Menu (opened from Details Sheet)
+            // Show Settings Menu
             if (showSettings && selectedEntry != null) {
                 NumberActionMenu(
-                    viewModel = viewModel,
                     number = selectedEntry.number,
                     label = selectedEntry.headline,
+                    intelResult = selectedNumberIntel,
                     onDismiss = { showSettings = false },
-                    onIdentify = {
-                        viewModel.performInvestigation(selectedEntry.number)
-                    },
+                    onOpenScanner = { isScannerMode = true },
                     onAddToWhitelist = { l -> viewModel.addToWhitelist(selectedEntry.number, l) },
                     onAddToBlacklist = { l -> viewModel.addToBlacklist(selectedEntry.number, l) },
                     onRemoveFromList = { 
-                        if (blacklist.size > 1) {
-                            val nextIdx = if (selectedIndex < blacklist.size - 1) selectedIndex else selectedIndex - 1
-                            val nextEntry = if (selectedIndex < blacklist.size - 1) blacklist[selectedIndex + 1] else blacklist[selectedIndex - 1]
+                        if (blacklistFull.size > 1) {
+                            val nextIdx = if (selectedIndex < blacklistFull.size - 1) selectedIndex else selectedIndex - 1
+                            val nextEntry = if (selectedIndex < blacklistFull.size - 1) blacklistFull[selectedIndex + 1] else blacklistFull[selectedIndex - 1]
                             viewModel.fetchIntelForNumber(nextEntry.number)
                             selectedIndex = nextIdx
                         } else {
@@ -385,36 +384,37 @@ fun WhitelistTab(
     selectedNumberIntel: com.xconflictionx.callguardshield.data.entity.PhoneLookupResult? = null,
     foregroundNumber: String? = null
 ) {
-    val whitelist by viewModel.whitelistFull.collectAsState()
+    val whitelistFull by viewModel.whitelistFull.collectAsState()
     var selectedIndex by remember { mutableIntStateOf(-1) }
     var showSettings by remember { mutableStateOf(false) }
     var showDetailsEditor by remember { mutableStateOf(false) }
+    var isScannerMode by remember { mutableStateOf(false) }
     val context = LocalContext.current
 
-    val selectedEntry = if (selectedIndex in whitelist.indices) whitelist[selectedIndex] else null
+    val selectedEntry = if (selectedIndex in whitelistFull.indices) whitelistFull[selectedIndex] else null
 
     Scaffold { padding ->
         Box(modifier = Modifier.padding(padding)) {
-            if (whitelist.isEmpty()) {
+            if (whitelistFull.isEmpty()) {
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Text("Whitelist is empty.", color = Color.Gray)
                 }
             }
 
             LazyColumn(modifier = Modifier.fillMaxSize()) {
-                itemsIndexed(whitelist) { index, entry ->
-                    val intel = entry.intel
+                itemsIndexed(whitelistFull) { index, entry ->
                     NumberItemCard(
                         headline = entry.headline,
                         subhead = if (entry.headline != entry.number) entry.number else null,
-                        ownerName = intel?.ownerName,
-                        companyName = intel?.companyName,
+                        ownerName = entry.intel?.ownerName,
+                        companyName = entry.intel?.companyName,
                         isBlocked = false,
                         callerInfo = entry.formattedInfo,
                         onClick = { 
                             selectedIndex = index
                             showSettings = false
                             showDetailsEditor = false
+                            isScannerMode = false
                             viewModel.fetchIntelForNumber(entry.number)
                         },
                         actionSlot = {
@@ -436,7 +436,7 @@ fun WhitelistTab(
                 }
             }
 
-            // Show Details Sheet first (primary view)
+            // Show Details Sheet
             if (!showSettings && !showDetailsEditor && selectedEntry != null) {
                 NumberDetailsSheet(
                     viewModel = viewModel,
@@ -444,42 +444,40 @@ fun WhitelistTab(
                     label = selectedEntry.headline,
                     intelResult = selectedNumberIntel,
                     isThisNumberIdentifying = foregroundNumber == selectedEntry.number,
+                    isScannerMode = isScannerMode,
                     onDismiss = { selectedIndex = -1 },
                     onOpenSettings = { showSettings = true },
-                    onIdentify = {
-                        viewModel.performInvestigation(selectedEntry.number)
-                    },
                     onNavigatePrevious = if (selectedIndex > 0) {
                         {
                             selectedIndex--
-                            viewModel.fetchIntelForNumber(whitelist[selectedIndex].number)
+                            isScannerMode = false
+                            viewModel.fetchIntelForNumber(whitelistFull[selectedIndex].number)
                         }
                     } else null,
-                    onNavigateNext = if (selectedIndex < whitelist.size - 1) {
+                    onNavigateNext = if (selectedIndex < whitelistFull.size - 1) {
                         {
                             selectedIndex++
-                            viewModel.fetchIntelForNumber(whitelist[selectedIndex].number)
+                            isScannerMode = false
+                            viewModel.fetchIntelForNumber(whitelistFull[selectedIndex].number)
                         }
                     } else null
                 )
             }
 
-            // Show Settings/Actions Menu (opened from Details Sheet)
+            // Show Settings Menu
             if (showSettings && selectedEntry != null) {
                 NumberActionMenu(
-                    viewModel = viewModel,
                     number = selectedEntry.number,
                     label = selectedEntry.headline,
+                    intelResult = selectedNumberIntel,
                     onDismiss = { showSettings = false },
-                    onIdentify = {
-                        viewModel.performInvestigation(selectedEntry.number)
-                    },
+                    onOpenScanner = { isScannerMode = true },
                     onAddToWhitelist = { l -> viewModel.addToWhitelist(selectedEntry.number, l) },
                     onAddToBlacklist = { l -> viewModel.addToBlacklist(selectedEntry.number, l) },
                     onRemoveFromList = { 
-                        if (whitelist.size > 1) {
-                            val nextIdx = if (selectedIndex < whitelist.size - 1) selectedIndex else selectedIndex - 1
-                            val nextEntry = if (selectedIndex < whitelist.size - 1) whitelist[selectedIndex + 1] else whitelist[selectedIndex - 1]
+                        if (whitelistFull.size > 1) {
+                            val nextIdx = if (selectedIndex < whitelistFull.size - 1) selectedIndex else selectedIndex - 1
+                            val nextEntry = if (selectedIndex < whitelistFull.size - 1) whitelistFull[selectedIndex + 1] else whitelistFull[selectedIndex - 1]
                             viewModel.fetchIntelForNumber(nextEntry.number)
                             selectedIndex = nextIdx
                         } else {

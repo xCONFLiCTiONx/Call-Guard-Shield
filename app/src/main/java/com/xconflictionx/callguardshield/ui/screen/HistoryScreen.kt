@@ -36,6 +36,7 @@ fun HistoryScreen(viewModel: MainViewModel) {
     var showSettings by remember { mutableStateOf(false) }
     var showDetailsEditor by remember { mutableStateOf(false) }
     var showClearDialog by remember { mutableStateOf(false) }
+    var isScannerMode by remember { mutableStateOf(false) }
 
     val selectedEntry = if (selectedIndex in logs.indices) logs[selectedIndex] else null
 
@@ -74,6 +75,7 @@ fun HistoryScreen(viewModel: MainViewModel) {
                             selectedIndex = index
                             showSettings = false
                             showDetailsEditor = false
+                            isScannerMode = false
                             viewModel.fetchIntelForNumber(entry.number)
                         },
                         actionSlot = {
@@ -119,7 +121,7 @@ fun HistoryScreen(viewModel: MainViewModel) {
                 )
             }
 
-            // Show Details Sheet first (primary view)
+            // Show Details Sheet (Primary View or Scanner View)
             if (!showSettings && !showDetailsEditor && selectedEntry != null) {
                 NumberDetailsSheet(
                     viewModel = viewModel,
@@ -127,36 +129,34 @@ fun HistoryScreen(viewModel: MainViewModel) {
                     label = selectedEntry.headline,
                     intelResult = selectedNumberIntel,
                     isThisNumberIdentifying = foregroundNumber == selectedEntry.number,
+                    isScannerMode = isScannerMode,
                     onDismiss = { selectedIndex = -1 },
                     onOpenSettings = { showSettings = true },
-                    onIdentify = {
-                        viewModel.performInvestigation(selectedEntry.number)
-                    },
                     onNavigatePrevious = if (selectedIndex > 0) {
                         {
                             selectedIndex--
+                            isScannerMode = false
                             viewModel.fetchIntelForNumber(logs[selectedIndex].number)
                         }
                     } else null,
                     onNavigateNext = if (selectedIndex < logs.size - 1) {
                         {
                             selectedIndex++
+                            isScannerMode = false
                             viewModel.fetchIntelForNumber(logs[selectedIndex].number)
                         }
                     } else null
                 )
             }
 
-            // Show Settings/Actions Menu (opened from Details Sheet)
+            // Show Settings Menu
             if (showSettings && selectedEntry != null) {
                 NumberActionMenu(
-                    viewModel = viewModel,
                     number = selectedEntry.number,
                     label = selectedEntry.headline,
+                    intelResult = selectedNumberIntel,
                     onDismiss = { showSettings = false },
-                    onIdentify = {
-                        viewModel.performInvestigation(selectedEntry.number)
-                    },
+                    onOpenScanner = { isScannerMode = true },
                     onAddToWhitelist = { viewModel.addToWhitelist(selectedEntry.number, it) },
                     onAddToBlacklist = { viewModel.addToBlacklist(selectedEntry.number, it) },
                     onRemoveFromList = { 

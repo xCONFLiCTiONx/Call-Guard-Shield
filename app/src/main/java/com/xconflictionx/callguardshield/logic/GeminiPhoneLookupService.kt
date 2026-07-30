@@ -108,20 +108,20 @@ class GeminiPhoneLookupService(
 
     private val systemInstructionText = """
         You are a highly accurate phone number intelligence expert. 
-        Your goal is to identify caller owners and reputations with zero hallucinations.
+        Your goal is to identify caller identity and reputation with maximum transparency.
         
-        CRITICAL RULES:
-        - Do NOT guess or hallucinate names.
-        - If you are not 100% certain of the owner/company name based on your data, return null.
-        - NEVER default to common names like 'Bank of America', 'Telemarketer', or 'Spam' unless you have specific data for THIS exact number.
-        - Accuracy scores must be honest. If uncertain, accuracy must be < 10.
+        RULES:
+        - Accuracy/Confidence is mandatory. Provide a whole number (0-100).
+        - The 'accuracy' score MUST represent your overall confidence in the **entirety of the information** provided in this JSON object.
+        - If you find high-quality public records or verified profiles, provide a high score (80-100).
+        - If the information is based on loose patterns or limited data, provide a lower score (below 50).
+        - Do NOT hallucinate names. If unknown, return null for name fields. 
+        - Even if names are null, you MUST provide a confidence score for the reputation and summary data you provide.
         
         STRICT OUTPUT FORMAT:
         - Return ONLY a single JSON object.
-        - 'ownerName' and 'companyName' MUST contain ONLY verified names or null.
-        - 'accuracy' MUST be a whole number between 0 and 100.
-        - 'evidence' MUST be a list of simple text strings.
-        - 'sources' MUST be a list of simple text strings.
+        - 'accuracy' (or 'confidence') MUST be a whole number 0-100 representing your data integrity.
+        - 'summary' MUST include your research logic.
     """.trimIndent()
 
     suspend fun lookup(phoneNumberVariations: Set<String>, forceRefresh: Boolean = false): PhoneLookupResult? = withContext(Dispatchers.IO) {
@@ -135,13 +135,13 @@ class GeminiPhoneLookupService(
             }
         }
 
-        // Fast Scan (No search) -> Deep Scan (Search) fallback for default lookup
+        // Use standard lookup logic (Fast -> Deep fallback)
         StatusManager.setGeminiStage("Fast Scan (High Speed)")
-        val prompt = "Identify identity/reputation for: $number. Output JSON: ownerName, companyName, category, accuracy (0-100), summary, spam (bool), scam (bool), evidence (list), sources (list)."
+        val prompt = "Identify identity/reputation for: $number. Output JSON with accuracy/confidence score (0-100)."
         
         var result = executeSingleModelRequest(prompt, number, searchMode = false)
         
-        if (result == null || result.accuracy < 85) {
+        if (result == null || result.accuracy < 60) {
             StatusManager.setGeminiStage("Deep Scan (Web Research)")
             result = executeSingleModelRequest(prompt, number, searchMode = true)
         }
@@ -152,48 +152,65 @@ class GeminiPhoneLookupService(
 
     suspend fun lookupFast(number: String): PhoneLookupResult? = withContext(Dispatchers.IO) {
         StatusManager.setGeminiStage("Fast Scan (High Speed)")
-        val prompt = "Identify identity/reputation for: $number. Output JSON: ownerName, companyName, category, accuracy (0-100), summary, spam (bool), scam (bool), evidence (list), sources (list)."
-        val result = executeSingleModelRequest(prompt, number, searchMode = false)
-        if (result != null) dao.insertLookupResult(result)
-        result
+        val prompt = "Identify: $number. JSON: ownerName, companyName, category, accuracy (0-100), summary, spam, scam, evidence, sources."
+        executeSingleModelRequest(prompt, number, searchMode = false)
     }
 
     suspend fun lookupDeep(number: String): PhoneLookupResult? = withContext(Dispatchers.IO) {
         StatusManager.setGeminiStage("Deep Scan (Web Research)")
-        val prompt = "CRITICAL DEEP SEARCH: $number. Output JSON: ownerName, companyName, category, accuracy (0-100), summary, spam, scam, evidence, sources."
+        val prompt = "DEEP WEB SEARCH: $number. JSON: ownerName, companyName, category, accuracy (0-100), summary, spam, scam, evidence, sources."
         executeSingleModelRequest(prompt, number, searchMode = true)
     }
 
     suspend fun lookupThorough(number: String): PhoneLookupResult? = withContext(Dispatchers.IO) {
-        val results = mutableListOf<PhoneLookupResult>()
-        val prompt = "THOROUGH INVESTIGATION: $number. Output JSON: ownerName, companyName, category, accuracy (0-100), summary, spam, scam, evidence, sources."
+        // Stage 1: Discovery
+        StatusManager.setGeminiStage("AI: Discovering identity...")
+        val discoveryPrompt = "THOROUGH DISCOVERY: Search the web for all identity, social, and business records linked to $number. List every specific finding and source found."
+        val discoveryNotes = executeRawRequest(discoveryPrompt, searchMode = true) ?: "No discovery data found."
         
-        repeat(3) { i ->
-            StatusManager.setGeminiStage("Thorough Scan (Stage ${i + 1}/3)")
-            executeSingleModelRequest(prompt, number, searchMode = true)?.let { results.add(it) }
-            if (i < 2) delay(1000.milliseconds) // Small breather between heavy deep scans
-        }
+        delay(500.milliseconds)
         
-        if (results.isEmpty()) return@withContext null
+        // Stage 2: Verification & Conflict Search
+        StatusManager.setGeminiStage("AI: Verifying spam records...")
+        val verificationPrompt = "VERIFICATION: Cross-reference the following discovery notes for $number with known spam databases and official registrations. Search for reports, complaints, or verification badges. Notes: $discoveryNotes"
+        val verificationNotes = executeRawRequest(verificationPrompt, searchMode = true) ?: "No verification data found."
         
-        // Pick the one with highest accuracy
-        val best = results.maxByOrNull { it.accuracy }
-        if (best != null) {
-            dao.insertLookupResult(best)
-        }
-        best
+        delay(500.milliseconds)
+        
+        // Stage 3: Synthesis
+        StatusManager.setGeminiStage("AI: Synthesizing final report...")
+        val synthesisPrompt = "SYNTHESIS: Analyze the research notes for $number. Weigh the evidence from both turns, resolve any conflicts, and output a final definitive JSON report (ownerName, companyName, category, accuracy (0-100), summary, spam, scam, evidence, sources). Research: TURN 1 (Discovery): $discoveryNotes | TURN 2 (Verification): $verificationNotes"
+        val result = executeSingleModelRequest(synthesisPrompt, number, searchMode = false)
+        
+        return@withContext result
     }
 
     suspend fun lookupRealTime(number: String): PhoneLookupResult? = withContext(Dispatchers.IO) {
         val cached = dao.getLookupResult(number)
         if (cached != null) return@withContext cached.copy(isCached = true)
         
-        val prompt = "Real-time Identify: $number. Output JSON (ownerName, companyName, accuracy (0-100), summary, spam, scam, debtCollector, telemarketer)."
+        val prompt = "Real-time Identify: $number. JSON: accuracy (0-100), summary, spam, scam, debtCollector, telemarketer."
         val result = executeSingleModelRequest(prompt, number, searchMode = false)
         if (result != null) {
             dao.insertLookupResult(result)
         }
         result
+    }
+
+    private suspend fun executeRawRequest(prompt: String, searchMode: Boolean): String? {
+        val cleanModelName = modelName.removePrefix("models/").ifBlank { "gemini-1.5-flash" }
+        val url = "https://generativelanguage.googleapis.com/v1/models/$cleanModelName:generateContent?key=$apiKey"
+        val request = GeminiRequest(
+            contents = listOf(GeminiContent(parts = listOf(GeminiPart(text = prompt)))),
+            tools = if (searchMode) listOf(GeminiTool(googleSearchRetrieval = emptyMap())) else null
+        )
+
+        return try {
+            val response = api.generateContent(url, request)
+            response.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text
+        } catch (e: Exception) {
+            null
+        }
     }
 
     @Suppress("UNCHECKED_CAST")
@@ -231,21 +248,13 @@ class GeminiPhoneLookupService(
                     try {
                         val retryResponse = api.generateContent(url, request)
                         val retryJson = retryResponse.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text ?: continue
-                        
-                        if (isDebugEnabled) {
-                            ConsoleLogger.log("GEMINI_RAW", retryJson, LogLevel.INFO)
-                        }
-
+                        if (isDebugEnabled) ConsoleLogger.log("GEMINI_RAW", retryJson, LogLevel.INFO)
                         return parseManualJson(retryJson, number)
                     } catch (re: Exception) {
                         break 
                     }
                 }
                 if (code == 404) continue 
-                
-                val body = (e as? HttpException)?.response()?.errorBody()?.string()
-                val errorMsg = if (code != null) "API Error $code: $body" else "Network error: ${e.message}"
-                ConsoleLogger.log("GEMINI", "Request failed: $errorMsg", LogLevel.ERROR)
                 break 
             }
         }
@@ -297,7 +306,7 @@ class GeminiPhoneLookupService(
                 ownerName = map["ownerName"] as? String,
                 companyName = map["companyName"] as? String,
                 category = (map["category"] as? String) ?: "Unknown",
-                accuracy = parsedAcc,
+                accuracy = if (parsedAcc == 0 && map["summary"] != null) 30 else parsedAcc, // Anti-zero fallback
                 spam = (map["spam"] as? Boolean) ?: (map["spam"]?.toString()?.toBoolean()) ?: false,
                 scam = (map["scam"] as? Boolean) ?: (map["scam"]?.toString()?.toBoolean()) ?: false,
                 debtCollector = (map["debtCollector"] as? Boolean) ?: (map["debtCollector"]?.toString()?.toBoolean()) ?: false,
@@ -308,24 +317,17 @@ class GeminiPhoneLookupService(
                 lookupDate = System.currentTimeMillis()
             )
         } catch (e: Exception) {
-            ConsoleLogger.log("PARSER", "Failed to parse manual JSON: ${e.message}", LogLevel.ERROR)
             null
         }
     }
 
-    data class GeminiRequest(
-        val contents: List<GeminiContent>,
-        val systemInstruction: GeminiContent? = null,
-        val tools: List<GeminiTool>? = null,
-        val generationConfig: GeminiGenerationConfig? = null
-    )
+    data class GeminiRequest(val contents: List<GeminiContent>, val systemInstruction: GeminiContent? = null, val tools: List<GeminiTool>? = null, val generationConfig: GeminiGenerationConfig? = null)
     data class GeminiContent(val parts: List<GeminiPart>)
     data class GeminiPart(val text: String)
     data class GeminiTool(val googleSearchRetrieval: Map<String, Any>? = null)
     data class GeminiGenerationConfig(val responseMimeType: String)
     data class GeminiResponse(val candidates: List<GeminiCandidate>?)
     data class GeminiCandidate(val content: GeminiContent?)
-
     data class GeminiModelListResponse(val models: List<GeminiModelDetail>?)
     data class GeminiModelDetail(val name: String, val version: String, val displayName: String)
 }
