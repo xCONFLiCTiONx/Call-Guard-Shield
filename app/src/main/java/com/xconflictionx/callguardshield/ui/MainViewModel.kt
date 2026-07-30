@@ -436,7 +436,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 c.remove(id)
             }
             settingsRepo.updateEnabledDictionaries(c)
-            if (!enabled) dao.deleteGlobalSpamByDictionary(id) 
         } 
     }
 

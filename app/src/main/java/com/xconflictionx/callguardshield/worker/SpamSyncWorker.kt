@@ -27,9 +27,8 @@ class SpamSyncWorker(
             val settingsRepo = SettingsRepository(applicationContext)
             val settings = settingsRepo.settingsFlow.first()
             
-            // If the database setting is OFF, purge everything and stop
+            // If the database setting is OFF, stop (but keep existing data cached)
             if (!settings.enabledDictionaries.contains("global")) {
-                dao.deleteGlobalSpamByDictionary("global")
                 return Result.success()
             }
 

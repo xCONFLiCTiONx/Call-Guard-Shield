@@ -38,6 +38,8 @@ import java.text.SimpleDateFormat
 import java.util.*
 import kotlin.math.roundToInt
 
+private val ActionBlue = Color(0xFF1565C0)
+
 @Composable
 fun SettingsScreen(viewModel: MainViewModel) {
     val settings by viewModel.settings.collectAsState()
@@ -260,9 +262,12 @@ fun SettingsScreen(viewModel: MainViewModel) {
                         val syncText = if (lastSync == 0L) "Never synced" else "Last sync: " + SimpleDateFormat("MMM dd, HH:mm", Locale.getDefault()).format(Date(lastSync))
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                             Text(syncText, style = MaterialTheme.typography.bodySmall, color = Color.Gray)
-                            TextButton(onClick = { viewModel.forceSync() }) {
+                            Button(
+                                onClick = { viewModel.forceSync() },
+                                colors = ButtonDefaults.buttonColors(containerColor = ActionBlue, contentColor = Color.White)
+                            ) {
                                 Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(4.dp))
+                                Spacer(modifier = Modifier.width(8.dp))
                                 Text("Sync Now", style = MaterialTheme.typography.labelSmall)
                             }
                         }
@@ -291,7 +296,12 @@ fun SettingsScreen(viewModel: MainViewModel) {
                             Text("Prevents system from killing the firewall service.", style = MaterialTheme.typography.bodySmall)
                         }
                         if (!isIgnoringBattery) {
-                            Button(onClick = { viewModel.requestIgnoreBatteryOptimizations(context) }) { Text("Manage") }
+                            Button(
+                                onClick = { viewModel.requestIgnoreBatteryOptimizations(context) },
+                                colors = ButtonDefaults.buttonColors(containerColor = ActionBlue, contentColor = Color.White)
+                            ) { 
+                                Text("Manage") 
+                            }
                         }
                     }
                     HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp), color = Color.Gray.copy(alpha = 0.1f))
@@ -301,10 +311,15 @@ fun SettingsScreen(viewModel: MainViewModel) {
                             Text("Required for region-based area code blocking.", style = MaterialTheme.typography.bodySmall)
                         }
                         if (!isBackgroundLocationGranted) {
-                            Button(onClick = { 
-                                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) showLocationRationale = true 
-                                else viewModel.requestBackgroundLocation(context)
-                            }) { Text("Manage") }
+                            Button(
+                                onClick = { 
+                                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) showLocationRationale = true 
+                                    else viewModel.requestBackgroundLocation(context)
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = ActionBlue, contentColor = Color.White)
+                            ) { 
+                                Text("Manage") 
+                            }
                         }
                     }
                 }
@@ -362,12 +377,20 @@ fun SettingsScreen(viewModel: MainViewModel) {
                             }
                         }
                         Row(modifier = Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Button(onClick = { viewModel.triggerAutoBackup() }, modifier = Modifier.weight(1f), colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary)) {
+                            Button(
+                                onClick = { viewModel.triggerAutoBackup() }, 
+                                modifier = Modifier.weight(1f), 
+                                colors = ButtonDefaults.buttonColors(containerColor = ActionBlue, contentColor = Color.White)
+                            ) {
                                 Icon(Icons.Default.CloudQueue, contentDescription = null, modifier = Modifier.size(16.dp))
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text("Sync Now", style = MaterialTheme.typography.labelSmall)
                             }
-                            OutlinedButton(onClick = { viewModel.triggerCloudRestore() }, modifier = Modifier.weight(1f)) {
+                            Button(
+                                onClick = { viewModel.triggerCloudRestore() }, 
+                                modifier = Modifier.weight(1f),
+                                colors = ButtonDefaults.buttonColors(containerColor = ActionBlue, contentColor = Color.White)
+                            ) {
                                 Icon(Icons.Default.CloudDownload, contentDescription = null, modifier = Modifier.size(16.dp))
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text("Restore", style = MaterialTheme.typography.labelSmall)
@@ -383,7 +406,8 @@ fun SettingsScreen(viewModel: MainViewModel) {
                                 client.signOut().addOnCompleteListener { googleSignInLauncher.launch(client.signInIntent) }
                             },
                             modifier = Modifier.fillMaxWidth(),
-                            enabled = !isConnectingGoogle
+                            enabled = !isConnectingGoogle,
+                            colors = ButtonDefaults.buttonColors(containerColor = ActionBlue, contentColor = Color.White)
                         ) {
                             if (isConnectingGoogle) {
                                 CircularProgressIndicator(modifier = Modifier.size(16.dp), color = Color.White, strokeWidth = 2.dp)
@@ -395,35 +419,7 @@ fun SettingsScreen(viewModel: MainViewModel) {
             }
         }
 
-        // 5. Data Management
-        item {
-            Text("Data Management", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-        }
-
-        item {
-            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Text("Manual Backup & Restore", style = MaterialTheme.typography.bodyLarge)
-                    Text("Save to a .bak file on your device storage.", style = MaterialTheme.typography.bodySmall)
-                    Row(modifier = Modifier.fillMaxWidth().padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(onClick = { viewModel.getFullBackupData { data -> exportData = data; fileSaver.launch("Call_Guard_Shield.bak") } }, modifier = Modifier.weight(1f)) { Text("Create Backup") }
-                        OutlinedButton(onClick = { filePicker.launch("*/*") }, modifier = Modifier.weight(1f)) { Text("Restore") }
-                    }
-                }
-            }
-        }
-
-        item {
-            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Text("Cache Management", style = MaterialTheme.typography.bodyLarge)
-                    Text("Local caller identification results (30 days).", style = MaterialTheme.typography.bodySmall)
-                    Button(onClick = { viewModel.clearLookupCache() }, modifier = Modifier.fillMaxWidth().padding(top = 12.dp), colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.errorContainer, contentColor = MaterialTheme.colorScheme.onErrorContainer)) { Text("Clear Lookup Cache") }
-                }
-            }
-        }
-
-        // 6. Gemini Intel Engine (Now near the bottom)
+        // 5. Gemini Intel Engine
         item {
             Text("Gemini Intel Engine", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
         }
@@ -436,8 +432,20 @@ fun SettingsScreen(viewModel: MainViewModel) {
                     Text("Required for caller investigation and identification.", style = MaterialTheme.typography.bodySmall)
                     OutlinedTextField(value = tempKey, onValueChange = { tempKey = it }, label = { Text("API Key") }, modifier = Modifier.fillMaxWidth().padding(top = 8.dp), visualTransformation = PasswordVisualTransformation(), singleLine = true)
                     Row(modifier = Modifier.fillMaxWidth().padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(onClick = { viewModel.saveGeminiKey(tempKey.trim()) }, modifier = Modifier.weight(1f)) { Text("Save") }
-                        OutlinedButton(onClick = { viewModel.testGeminiKey() }, modifier = Modifier.weight(1f)) { Text("Test Key") }
+                        Button(
+                            onClick = { viewModel.saveGeminiKey(tempKey.trim()) }, 
+                            modifier = Modifier.weight(1f),
+                            colors = ButtonDefaults.buttonColors(containerColor = ActionBlue, contentColor = Color.White)
+                        ) { 
+                            Text("Save") 
+                        }
+                        Button(
+                            onClick = { viewModel.testGeminiKey() }, 
+                            modifier = Modifier.weight(1f),
+                            colors = ButtonDefaults.buttonColors(containerColor = ActionBlue, contentColor = Color.White)
+                        ) { 
+                            Text("Test Key") 
+                        }
                     }
                     if (apiKeyStatus == "Connected") {
                         TextButton(onClick = { viewModel.clearGeminiKey() }, modifier = Modifier.align(Alignment.CenterHorizontally)) { Text("Clear Saved Key", color = MaterialTheme.colorScheme.error) }
@@ -461,7 +469,13 @@ fun SettingsScreen(viewModel: MainViewModel) {
                         val maintText = if (lastMaint == 0L) "Never refreshed" else "Last re-scan: " + SimpleDateFormat("MMM dd, HH:mm", Locale.getDefault()).format(Date(lastMaint))
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                             Text(maintText, style = MaterialTheme.typography.bodySmall, color = Color.Gray)
-                            Button(onClick = { viewModel.runMaintenanceNow() }, shape = MaterialTheme.shapes.small) { Text("Run Now", style = MaterialTheme.typography.labelSmall) }
+                            Button(
+                                onClick = { viewModel.runMaintenanceNow() }, 
+                                shape = MaterialTheme.shapes.small,
+                                colors = ButtonDefaults.buttonColors(containerColor = ActionBlue, contentColor = Color.White)
+                            ) { 
+                                Text("Run Now", style = MaterialTheme.typography.labelSmall) 
+                            }
                         }
                     }
                 }
@@ -513,6 +527,36 @@ fun SettingsScreen(viewModel: MainViewModel) {
             }
         }
 
+        // 5. Data Management
+        item {
+            Text("Data Management", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+        }
+
+        item {
+            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text("Manual Backup & Restore", style = MaterialTheme.typography.bodyLarge)
+                    Text("Save to a .bak file on your device storage.", style = MaterialTheme.typography.bodySmall)
+                    Row(modifier = Modifier.fillMaxWidth().padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(
+                            onClick = { viewModel.getFullBackupData { data -> exportData = data; fileSaver.launch("Call_Guard_Shield.bak") } }, 
+                            modifier = Modifier.weight(1f),
+                            colors = ButtonDefaults.buttonColors(containerColor = ActionBlue, contentColor = Color.White)
+                        ) { 
+                            Text("Create Backup") 
+                        }
+                        Button(
+                            onClick = { filePicker.launch("*/*") }, 
+                            modifier = Modifier.weight(1f),
+                            colors = ButtonDefaults.buttonColors(containerColor = ActionBlue, contentColor = Color.White)
+                        ) { 
+                            Text("Restore") 
+                        }
+                    }
+                }
+            }
+        }
+
         // 7. Technical Console
         item { Text("Technical Console", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold) }
         item {
@@ -555,6 +599,22 @@ fun SettingsScreen(viewModel: MainViewModel) {
         }
 
         item {
+            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text("Cache Management", style = MaterialTheme.typography.bodyLarge)
+                    Text("Local caller identification results (30 days).", style = MaterialTheme.typography.bodySmall)
+                    Button(
+                        onClick = { viewModel.clearLookupCache() }, 
+                        modifier = Modifier.fillMaxWidth().padding(top = 12.dp), 
+                        colors = ButtonDefaults.buttonColors(containerColor = ActionBlue, contentColor = Color.White)
+                    ) { 
+                        Text("Clear Lookup Cache") 
+                    }
+                }
+            }
+        }
+
+        item {
             Column(modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 Text("Call Guard Shield", style = MaterialTheme.typography.titleSmall)
                 Text("Version 1.0", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
@@ -569,10 +629,15 @@ fun SettingsScreen(viewModel: MainViewModel) {
             title = { Text("Location Background Access") },
             text = { Text("To block spam based on your region while the app is closed, please select 'Allow all the time' on the next screen.") },
             confirmButton = {
-                Button(onClick = {
-                    showLocationRationale = false
-                    backgroundLocationLauncher.launch(android.Manifest.permission.ACCESS_BACKGROUND_LOCATION)
-                }) { Text("Continue") }
+                Button(
+                    onClick = {
+                        showLocationRationale = false
+                        backgroundLocationLauncher.launch(android.Manifest.permission.ACCESS_BACKGROUND_LOCATION)
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = ActionBlue, contentColor = Color.White)
+                ) { 
+                    Text("Continue") 
+                }
             },
             dismissButton = { TextButton(onClick = { showLocationRationale = false }) { Text("Cancel") } }
         )

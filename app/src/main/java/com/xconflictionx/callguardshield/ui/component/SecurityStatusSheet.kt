@@ -14,6 +14,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.xconflictionx.callguardshield.data.entity.CallLogEntry
 import com.xconflictionx.callguardshield.ui.MainViewModel
+import java.text.SimpleDateFormat
+import java.util.*
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -22,8 +24,11 @@ fun SecurityStatusSheet(
     onDismiss: () -> Unit
 ) {
     val settings by viewModel.settings.collectAsState()
+    val apiKeyStatus by viewModel.apiKeyStatus.collectAsState()
     val suggestions by viewModel.securitySuggestions.collectAsState()
     
+    val dateFormatter = SimpleDateFormat("MMM dd, HH:mm", Locale.getDefault())
+
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         containerColor = MaterialTheme.colorScheme.surface
@@ -47,6 +52,48 @@ fun SecurityStatusSheet(
                     style = MaterialTheme.typography.bodySmall,
                     color = Color.Gray
                 )
+            }
+
+            // 0. System Intelligence
+            item {
+                Text("System Intelligence", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                Spacer(modifier = Modifier.height(8.dp))
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                ) {
+                    Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        MetricRow(
+                            label = "Gemini Status",
+                            value = apiKeyStatus,
+                            valueColor = if (apiKeyStatus == "Connected") Color.Green else Color.Red
+                        )
+                        
+                        val driveEmail = settings.googleAccountEmail ?: "Not Connected"
+                        MetricRow(
+                            label = "Google Sync Account",
+                            value = driveEmail,
+                            valueColor = if (settings.googleAccountEmail != null) Color.Green else Color.Gray
+                        )
+
+                        val syncTime = if (settings.lastSyncTime == 0L) "Never" else dateFormatter.format(Date(settings.lastSyncTime))
+                        MetricRow(
+                            label = "Last Cloud Sync",
+                            value = syncTime
+                        )
+
+                        val isSpamActive = settings.enabledDictionaries.contains("global")
+                        MetricRow(
+                            label = "Spam Database",
+                            value = if (isSpamActive) "Downloaded & Active" else "Not Installed",
+                            valueColor = if (isSpamActive) Color.Green else Color.Gray
+                        )
+
+                        if (isSpamActive) {
+                            val spamUpdate = if (settings.lastSyncTime == 0L) "Pending" else syncTime
+                            MetricRow(label = "Database Version", value = spamUpdate)
+                        }
+                    }
+                }
             }
 
             // 1. Active Shields
@@ -110,6 +157,14 @@ fun SecurityStatusSheet(
             
             item { Spacer(modifier = Modifier.height(24.dp)) }
         }
+    }
+}
+
+@Composable
+fun MetricRow(label: String, value: String, valueColor: Color = MaterialTheme.colorScheme.onSurfaceVariant) {
+    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+        Text(label, style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+        Text(value, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold, color = valueColor)
     }
 }
 
