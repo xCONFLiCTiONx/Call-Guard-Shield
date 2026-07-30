@@ -9,23 +9,22 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.AutoAwesome
-import androidx.compose.material.icons.filled.FileUpload
-import androidx.compose.material.icons.filled.FileDownload
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.xconflictionx.callguardshield.ui.MainViewModel
 import com.xconflictionx.callguardshield.ui.component.NumberActionMenu
 import com.xconflictionx.callguardshield.ui.component.NumberDetailsSheet
 import com.xconflictionx.callguardshield.ui.component.EditNumberDetailsDialog
+import com.xconflictionx.callguardshield.ui.component.NumberItemCard
 import com.xconflictionx.callguardshield.data.entity.BlacklistEntry
 import com.xconflictionx.callguardshield.data.entity.WhitelistEntry
 
@@ -38,13 +37,12 @@ fun ListManagementScreen(viewModel: MainViewModel) {
     val selectedNumberIntel by viewModel.selectedNumberIntel.collectAsState()
     var tabIndex by remember { mutableIntStateOf(0) }
     val tabs = listOf("Blacklist", "Whitelist")
-    val context = LocalContext.current
+    val icons = listOf(Icons.Default.Block, Icons.Default.VerifiedUser)
     
     var pendingFileUri by remember { mutableStateOf<Uri?>(null) }
     var showImportDialog by remember { mutableStateOf(false) }
     var showPasteDialog by remember { mutableStateOf(false) }
     var showAddSingleDialog by remember { mutableStateOf(false) }
-    var exportData by remember { mutableStateOf("") }
 
     val filePicker = rememberLauncherForActivityResult(
         ActivityResultContracts.GetContent()
@@ -55,23 +53,14 @@ fun ListManagementScreen(viewModel: MainViewModel) {
         }
     }
 
-    val fileSaver = rememberLauncherForActivityResult(
-        ActivityResultContracts.CreateDocument("text/plain")
-    ) { uri ->
-        uri?.let {
-            context.contentResolver.openOutputStream(it)?.use { stream ->
-                stream.write(exportData.toByteArray())
-            }
-        }
-    }
-
     Column {
         PrimaryTabRow(selectedTabIndex = tabIndex) {
             tabs.forEachIndexed { index, title ->
                 Tab(
                     selected = tabIndex == index,
                     onClick = { tabIndex = index },
-                    text = { Text(title) }
+                    text = { Text(title) },
+                    icon = { Icon(icons[index], contentDescription = null) }
                 )
             }
         }
@@ -80,7 +69,7 @@ fun ListManagementScreen(viewModel: MainViewModel) {
             Column(modifier = Modifier.fillMaxWidth()) {
                 val p = bulkProgress ?: 0f
                 LinearProgressIndicator(
-                    progress = p,
+                    progress = { p },
                     modifier = Modifier.fillMaxWidth().height(4.dp),
                     color = MaterialTheme.colorScheme.primary,
                     trackColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.2f)
@@ -260,10 +249,13 @@ fun BlacklistTab(
     selectedNumberIntel: com.xconflictionx.callguardshield.data.entity.PhoneLookupResult? = null,
     foregroundNumber: String? = null
 ) {
-    val blacklist by viewModel.blacklist.collectAsState()
-    var selectedItem by remember { mutableStateOf<Triple<String, String?, Boolean>?>(null) } 
+    val blacklist by viewModel.blacklistFull.collectAsState()
+    var selectedIndex by remember { mutableIntStateOf(-1) }
     var showSettings by remember { mutableStateOf(false) }
+    var showDetailsEditor by remember { mutableStateOf(false) }
     val context = LocalContext.current
+
+    val selectedEntry = if (selectedIndex in blacklist.indices) blacklist[selectedIndex] else null
 
     Scaffold { padding ->
         Box(modifier = Modifier.padding(padding)) {
@@ -274,84 +266,112 @@ fun BlacklistTab(
             }
 
             LazyColumn(modifier = Modifier.fillMaxSize()) {
-                items(blacklist) { entry ->
-                    ListItem(
-                        headlineContent = { Text(entry.label ?: entry.pattern) },
-                        supportingContent = { 
-                            if (entry.label != null) Text(entry.pattern)
-                        },
-                        modifier = Modifier.clickable { 
-                            selectedItem = Triple(entry.pattern, entry.label, false)
+                itemsIndexed(blacklist) { index, entry ->
+                    val intel = entry.intel
+                    NumberItemCard(
+                        headline = entry.headline,
+                        subhead = if (entry.headline != entry.number) entry.number else null,
+                        ownerName = intel?.ownerName,
+                        companyName = intel?.companyName,
+                        isBlocked = true,
+                        callerInfo = entry.formattedInfo,
+                        onClick = { 
+                            selectedIndex = index
                             showSettings = false
-                            viewModel.fetchIntelForNumber(entry.pattern)
+                            showDetailsEditor = false
+                            viewModel.fetchIntelForNumber(entry.number)
+                        },
+                        actionSlot = {
+                            if (entry.count > 0) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = "Calls: x${entry.count}",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
                         }
                     )
                 }
             }
 
             // Show Details Sheet first (primary view)
-            if (!showSettings && selectedItem != null && !selectedItem!!.third) {
-                val (number, label, _) = selectedItem!!
+            if (!showSettings && !showDetailsEditor && selectedEntry != null) {
                 NumberDetailsSheet(
                     viewModel = viewModel,
-                    number = number,
-                    label = label,
+                    number = selectedEntry.number,
+                    label = selectedEntry.headline,
                     intelResult = selectedNumberIntel,
-                    isThisNumberIdentifying = foregroundNumber == number,
-                    onDismiss = { selectedItem = null },
+                    isThisNumberIdentifying = foregroundNumber == selectedEntry.number,
+                    onDismiss = { selectedIndex = -1 },
                     onOpenSettings = { showSettings = true },
                     onIdentify = {
-                        viewModel.performInvestigation(number)
-                    }
+                        viewModel.performInvestigation(selectedEntry.number)
+                    },
+                    onNavigatePrevious = if (selectedIndex > 0) {
+                        {
+                            selectedIndex--
+                            viewModel.fetchIntelForNumber(blacklist[selectedIndex].number)
+                        }
+                    } else null,
+                    onNavigateNext = if (selectedIndex < blacklist.size - 1) {
+                        {
+                            selectedIndex++
+                            viewModel.fetchIntelForNumber(blacklist[selectedIndex].number)
+                        }
+                    } else null
                 )
             }
 
             // Show Settings/Actions Menu (opened from Details Sheet)
-            if (showSettings && selectedItem != null && !selectedItem!!.third) {
-                val (number, label, _) = selectedItem!!
+            if (showSettings && selectedEntry != null) {
                 NumberActionMenu(
                     viewModel = viewModel,
-                    number = number,
-                    label = label,
+                    number = selectedEntry.number,
+                    label = selectedEntry.headline,
                     onDismiss = { showSettings = false },
                     onIdentify = {
-                        viewModel.performInvestigation(number)
+                        viewModel.performInvestigation(selectedEntry.number)
                     },
-                    onAddToWhitelist = { l -> viewModel.addToWhitelist(number, l) },
-                    onAddToBlacklist = { l -> viewModel.addToBlacklist(number, l) },
+                    onAddToWhitelist = { l -> viewModel.addToWhitelist(selectedEntry.number, l) },
+                    onAddToBlacklist = { l -> viewModel.addToBlacklist(selectedEntry.number, l) },
                     onRemoveFromList = { 
-                        blacklist.find { it.pattern == number }?.let { entry ->
-                            val index = blacklist.indexOf(entry)
-                            if (index != -1 && blacklist.size > 1) {
-                                val nextIndex = if (index < blacklist.size - 1) index + 1 else index - 1
-                                val nextEntry = blacklist[nextIndex]
-                                selectedItem = Triple(nextEntry.pattern, nextEntry.label, false)
-                                viewModel.fetchIntelForNumber(nextEntry.pattern)
-                            } else {
-                                selectedItem = null
-                            }
-                            viewModel.removeFromBlacklist(entry)
+                        if (blacklist.size > 1) {
+                            val nextIdx = if (selectedIndex < blacklist.size - 1) selectedIndex else selectedIndex - 1
+                            val nextEntry = if (selectedIndex < blacklist.size - 1) blacklist[selectedIndex + 1] else blacklist[selectedIndex - 1]
+                            viewModel.fetchIntelForNumber(nextEntry.number)
+                            selectedIndex = nextIdx
+                        } else {
+                            selectedIndex = -1
                         }
+                        viewModel.removeFromBlacklist(BlacklistEntry(selectedEntry.number, selectedEntry.label))
                     },
                     onEditLabel = { 
                         showSettings = false
-                        selectedItem = Triple(number, label, true) 
+                        showDetailsEditor = true
                     },
-                    onAddToContacts = { launchAddContactIntent(context, number) },
-                    onCall = { launchCallIntent(context, number) }
+                    onAddToContacts = { launchAddContactIntent(context, selectedEntry.number) },
+                    onCall = { launchCallIntent(context, selectedEntry.number) }
                 )
             }
 
-            // Edit Label dialog (separate from settings)
-            if (selectedItem?.third == true) {
-                val (number, _, _) = selectedItem!!
+            if (showDetailsEditor && selectedEntry != null) {
                 EditNumberDetailsDialog(
-                    number = number,
+                    number = selectedEntry.number,
                     initialIntel = selectedNumberIntel,
-                    onDismiss = { selectedItem = null },
+                    onDismiss = { 
+                        showDetailsEditor = false
+                        selectedIndex = -1
+                    },
                     onConfirm = { oldNum, updatedIntel ->
-                        viewModel.updateFullNumberDetails(oldNum, updatedIntel, null)
-                        selectedItem = null
+                        viewModel.updateFullNumberDetails(oldNum, updatedIntel)
+                        showDetailsEditor = false
+                        selectedIndex = -1
                     }
                 )
             }
@@ -365,10 +385,13 @@ fun WhitelistTab(
     selectedNumberIntel: com.xconflictionx.callguardshield.data.entity.PhoneLookupResult? = null,
     foregroundNumber: String? = null
 ) {
-    val whitelist by viewModel.whitelist.collectAsState()
-    var selectedItem by remember { mutableStateOf<Triple<String, String?, Boolean>?>(null) }
+    val whitelist by viewModel.whitelistFull.collectAsState()
+    var selectedIndex by remember { mutableIntStateOf(-1) }
     var showSettings by remember { mutableStateOf(false) }
+    var showDetailsEditor by remember { mutableStateOf(false) }
     val context = LocalContext.current
+
+    val selectedEntry = if (selectedIndex in whitelist.indices) whitelist[selectedIndex] else null
 
     Scaffold { padding ->
         Box(modifier = Modifier.padding(padding)) {
@@ -379,84 +402,112 @@ fun WhitelistTab(
             }
 
             LazyColumn(modifier = Modifier.fillMaxSize()) {
-                items(whitelist) { entry ->
-                    ListItem(
-                        headlineContent = { Text(entry.label ?: entry.number) },
-                        supportingContent = { 
-                            if (entry.label != null) Text(entry.number)
-                        },
-                        modifier = Modifier.clickable { 
-                            selectedItem = Triple(entry.number, entry.label, false)
+                itemsIndexed(whitelist) { index, entry ->
+                    val intel = entry.intel
+                    NumberItemCard(
+                        headline = entry.headline,
+                        subhead = if (entry.headline != entry.number) entry.number else null,
+                        ownerName = intel?.ownerName,
+                        companyName = intel?.companyName,
+                        isBlocked = false,
+                        callerInfo = entry.formattedInfo,
+                        onClick = { 
+                            selectedIndex = index
                             showSettings = false
+                            showDetailsEditor = false
                             viewModel.fetchIntelForNumber(entry.number)
+                        },
+                        actionSlot = {
+                            if (entry.count > 0) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = "Calls: x${entry.count}",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
                         }
                     )
                 }
             }
 
             // Show Details Sheet first (primary view)
-            if (!showSettings && selectedItem != null && !selectedItem!!.third) {
-                val (number, label, _) = selectedItem!!
+            if (!showSettings && !showDetailsEditor && selectedEntry != null) {
                 NumberDetailsSheet(
                     viewModel = viewModel,
-                    number = number,
-                    label = label,
+                    number = selectedEntry.number,
+                    label = selectedEntry.headline,
                     intelResult = selectedNumberIntel,
-                    isThisNumberIdentifying = foregroundNumber == number,
-                    onDismiss = { selectedItem = null },
+                    isThisNumberIdentifying = foregroundNumber == selectedEntry.number,
+                    onDismiss = { selectedIndex = -1 },
                     onOpenSettings = { showSettings = true },
                     onIdentify = {
-                        viewModel.performInvestigation(number)
-                    }
+                        viewModel.performInvestigation(selectedEntry.number)
+                    },
+                    onNavigatePrevious = if (selectedIndex > 0) {
+                        {
+                            selectedIndex--
+                            viewModel.fetchIntelForNumber(whitelist[selectedIndex].number)
+                        }
+                    } else null,
+                    onNavigateNext = if (selectedIndex < whitelist.size - 1) {
+                        {
+                            selectedIndex++
+                            viewModel.fetchIntelForNumber(whitelist[selectedIndex].number)
+                        }
+                    } else null
                 )
             }
 
             // Show Settings/Actions Menu (opened from Details Sheet)
-            if (showSettings && selectedItem != null && !selectedItem!!.third) {
-                val (number, label, _) = selectedItem!!
+            if (showSettings && selectedEntry != null) {
                 NumberActionMenu(
                     viewModel = viewModel,
-                    number = number,
-                    label = label,
+                    number = selectedEntry.number,
+                    label = selectedEntry.headline,
                     onDismiss = { showSettings = false },
                     onIdentify = {
-                        viewModel.performInvestigation(number)
+                        viewModel.performInvestigation(selectedEntry.number)
                     },
-                    onAddToWhitelist = { l -> viewModel.addToWhitelist(number, l) },
-                    onAddToBlacklist = { l -> viewModel.addToBlacklist(number, l) },
+                    onAddToWhitelist = { l -> viewModel.addToWhitelist(selectedEntry.number, l) },
+                    onAddToBlacklist = { l -> viewModel.addToBlacklist(selectedEntry.number, l) },
                     onRemoveFromList = { 
-                        whitelist.find { it.number == number }?.let { entry ->
-                            val index = whitelist.indexOf(entry)
-                            if (index != -1 && whitelist.size > 1) {
-                                val nextIndex = if (index < whitelist.size - 1) index + 1 else index - 1
-                                val nextEntry = whitelist[nextIndex]
-                                selectedItem = Triple(nextEntry.number, nextEntry.label, false)
-                                viewModel.fetchIntelForNumber(nextEntry.number)
-                            } else {
-                                selectedItem = null
-                            }
-                            viewModel.removeFromWhitelist(entry)
+                        if (whitelist.size > 1) {
+                            val nextIdx = if (selectedIndex < whitelist.size - 1) selectedIndex else selectedIndex - 1
+                            val nextEntry = if (selectedIndex < whitelist.size - 1) whitelist[selectedIndex + 1] else whitelist[selectedIndex - 1]
+                            viewModel.fetchIntelForNumber(nextEntry.number)
+                            selectedIndex = nextIdx
+                        } else {
+                            selectedIndex = -1
                         }
+                        viewModel.removeFromWhitelist(WhitelistEntry(selectedEntry.number, selectedEntry.label))
                     },
                     onEditLabel = { 
                         showSettings = false
-                        selectedItem = Triple(number, label, true) 
+                        showDetailsEditor = true
                     },
-                    onAddToContacts = { launchAddContactIntent(context, number) },
-                    onCall = { launchCallIntent(context, number) }
+                    onAddToContacts = { launchAddContactIntent(context, selectedEntry.number) },
+                    onCall = { launchCallIntent(context, selectedEntry.number) }
                 )
             }
 
-            // Edit Label dialog (separate from settings)
-            if (selectedItem?.third == true) {
-                val (number, _, _) = selectedItem!!
+            if (showDetailsEditor && selectedEntry != null) {
                 EditNumberDetailsDialog(
-                    number = number,
+                    number = selectedEntry.number,
                     initialIntel = selectedNumberIntel,
-                    onDismiss = { selectedItem = null },
+                    onDismiss = { 
+                        showDetailsEditor = false
+                        selectedIndex = -1
+                    },
                     onConfirm = { oldNum, updatedIntel ->
-                        viewModel.updateFullNumberDetails(oldNum, updatedIntel, null)
-                        selectedItem = null
+                        viewModel.updateFullNumberDetails(oldNum, updatedIntel)
+                        showDetailsEditor = false
+                        selectedIndex = -1
                     }
                 )
             }

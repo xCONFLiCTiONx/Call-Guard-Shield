@@ -11,12 +11,15 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.xconflictionx.callguardshield.data.entity.PhoneLookupResult
 import com.xconflictionx.callguardshield.ui.MainViewModel
+import java.text.SimpleDateFormat
+import java.util.*
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -28,24 +31,87 @@ fun NumberDetailsSheet(
     isThisNumberIdentifying: Boolean = false,
     onDismiss: () -> Unit,
     onOpenSettings: () -> Unit,
-    onIdentify: () -> Unit
+    onIdentify: () -> Unit,
+    onNavigatePrevious: (() -> Unit)? = null,
+    onNavigateNext: (() -> Unit)? = null
 ) {
     val geminiStageState = viewModel.geminiStage.collectAsState(initial = null)
     val geminiStage = geminiStageState.value
     
     val pendingResult by viewModel.pendingIntelResult.collectAsState()
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    
+    val groupedLogs by viewModel.groupedCallLogs.collectAsState()
+    val currentGroup = groupedLogs.find { it.number == number }
+    val timeline = currentGroup?.allTimestamps ?: emptyList()
 
-    ModalBottomSheet(onDismissRequest = onDismiss) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        dragHandle = { BottomSheetDefaults.DragHandle() },
+        contentWindowInsets = { WindowInsets(0) }
+    ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .statusBarsPadding()
                 .padding(bottom = 16.dp)
         ) {
+            // Navigation Row at the very top
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // Back Button (Left)
+                Box(modifier = Modifier.size(48.dp)) {
+                    if (onNavigatePrevious != null) {
+                        IconButton(
+                            onClick = onNavigatePrevious,
+                            modifier = Modifier.align(Alignment.Center)
+                        ) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.ArrowBack, 
+                                contentDescription = "Previous",
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    }
+                }
+
+                Text(
+                    text = "Caller Details",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+
+                // Next Button (Right)
+                Box(modifier = Modifier.size(48.dp)) {
+                    if (onNavigateNext != null) {
+                        IconButton(
+                            onClick = onNavigateNext,
+                            modifier = Modifier.align(Alignment.Center)
+                        ) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.ArrowForward, 
+                                contentDescription = "Next",
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    }
+                }
+            }
+
+            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp), color = Color.Gray.copy(alpha = 0.1f))
+
             // Header with number and settings button
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(16.dp),
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -179,6 +245,32 @@ fun NumberDetailsSheet(
                     }
                 } else {
                     Text("No AI intelligence data available yet.", color = Color.Gray, modifier = Modifier.padding(vertical = 16.dp))
+                }
+
+                // Call Timeline Section
+                if (timeline.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(24.dp))
+                    Text(
+                        text = "Call History Timeline (x${timeline.size})",
+                        style = MaterialTheme.typography.titleSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    
+                    val locale = LocalConfiguration.current.locales[0]
+                    val df = SimpleDateFormat("MMM dd, HH:mm", locale)
+                    
+                    timeline.take(20).forEach { ts ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(Icons.Default.History, contentDescription = null, modifier = Modifier.size(14.dp), tint = Color.Gray)
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Text(text = df.format(Date(ts)), style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
                 }
             }
 

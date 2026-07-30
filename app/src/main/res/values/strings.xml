@@ -1,5 +1,3 @@
 <resources>
     <string name="app_name">Call Guard Shield</string>
-    <string name="shortcut_history_short">History</string>
-    <string name="shortcut_history_long">Open Call History</string>
 </resources>

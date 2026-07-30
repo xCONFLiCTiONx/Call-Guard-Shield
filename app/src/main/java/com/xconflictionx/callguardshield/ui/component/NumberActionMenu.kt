@@ -36,11 +36,17 @@ fun NumberActionMenu(
     var showLabelDialog by remember { mutableStateOf<LabelDialogType?>(null) }
     
     val pendingResult by viewModel.pendingIntelResult.collectAsState()
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
-    ModalBottomSheet(onDismissRequest = onDismiss) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        contentWindowInsets = { WindowInsets(0) }
+    ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .statusBarsPadding()
                 .padding(bottom = 32.dp)
         ) {
             // Header: Number and Label

@@ -19,6 +19,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -183,6 +184,99 @@ fun SettingsScreen(viewModel: MainViewModel) {
             }
         }
 
+        // --- GOOGLE SYNC (NOW AT TOP) ---
+        item {
+            val isDriveConnected by viewModel.isGoogleDriveConnected.collectAsState()
+            val isBackupActive by viewModel.isBackupActive.collectAsState()
+            
+            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text("☁️ Sync to Google Account", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    Text("Securely backup your settings and history to your personal cloud storage.", style = MaterialTheme.typography.bodySmall)
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    if (driveError == "API_DISABLED") {
+                        Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer), modifier = Modifier.padding(bottom = 12.dp)) {
+                            Column(modifier = Modifier.padding(12.dp)) {
+                                Text("ACTION REQUIRED", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.error)
+                                Text("Google Drive API is disabled in your cloud project. This is why sync is failing.", style = MaterialTheme.typography.bodySmall)
+                                Button(
+                                    onClick = { 
+                                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://console.developers.google.com/apis/api/drive.googleapis.com/overview?project=38581640934"))
+                                        context.startActivity(intent)
+                                    },
+                                    modifier = Modifier.padding(top = 8.dp).fillMaxWidth(),
+                                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                                ) {
+                                    Text("Enable Drive API Now")
+                                }
+                            }
+                        }
+                    }
+                    
+                    if (isDriveConnected) {
+                        Column(modifier = Modifier.fillMaxWidth()) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.CloudDone, contentDescription = null, tint = Color.Green, modifier = Modifier.size(24.dp))
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(text = "Connected", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold, color = Color.Green)
+                                    Text(text = settings.googleAccountEmail ?: "Active Account", style = MaterialTheme.typography.bodySmall, color = Color.LightGray)
+                                }
+                                TextButton(
+                                    onClick = { 
+                                        val gso = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN).build()
+                                        val client = GoogleSignIn.getClient(context, gso)
+                                        client.signOut().addOnCompleteListener { viewModel.disconnectGoogleDrive() }
+                                    }
+                                ) {
+                                    Text("Sign Out", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelMedium)
+                                }
+                            }
+                        }
+                        Row(modifier = Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Button(
+                                onClick = { viewModel.triggerAutoBackup() }, 
+                                modifier = Modifier.weight(1f), 
+                                colors = ButtonDefaults.buttonColors(containerColor = ActionBlue, contentColor = Color.White)
+                            ) {
+                                Icon(Icons.Default.CloudQueue, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Sync Now", style = MaterialTheme.typography.labelSmall)
+                            }
+                            Button(
+                                onClick = { viewModel.triggerCloudRestore() }, 
+                                modifier = Modifier.weight(1f),
+                                colors = ButtonDefaults.buttonColors(containerColor = ActionBlue, contentColor = Color.White)
+                            ) {
+                                Icon(Icons.Default.CloudDownload, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Restore", style = MaterialTheme.typography.labelSmall)
+                            }
+                        }
+                        if (isBackupActive) LinearProgressIndicator(modifier = Modifier.fillMaxWidth().height(2.dp).padding(top = 4.dp), color = Color.Green, trackColor = Color.Transparent)
+                    } else {
+                        Button(
+                            onClick = { 
+                                isConnectingGoogle = true
+                                val gso = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN).requestEmail().requestScopes(Scope("https://www.googleapis.com/auth/drive.file")).build()
+                                val client = GoogleSignIn.getClient(context, gso)
+                                client.signOut().addOnCompleteListener { googleSignInLauncher.launch(client.signInIntent) }
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            enabled = !isConnectingGoogle,
+                            colors = ButtonDefaults.buttonColors(containerColor = ActionBlue, contentColor = Color.White)
+                        ) {
+                            if (isConnectingGoogle) {
+                                CircularProgressIndicator(modifier = Modifier.size(16.dp), color = Color.White, strokeWidth = 2.dp)
+                                Spacer(modifier = Modifier.width(8.dp)); Text("Connecting...")
+                            } else Text("Sign in with Google")
+                        }
+                    }
+                }
+            }
+        }
+
         // 1. Security Zones
         item {
             Text("Security Zones", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
@@ -320,99 +414,6 @@ fun SettingsScreen(viewModel: MainViewModel) {
                             ) { 
                                 Text("Manage") 
                             }
-                        }
-                    }
-                }
-            }
-        }
-
-        // 4. Google Account Sync
-        item {
-            val isDriveConnected by viewModel.isGoogleDriveConnected.collectAsState()
-            val isBackupActive by viewModel.isBackupActive.collectAsState()
-            
-            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Text("☁️ Sync to Google Account", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                    Text("Securely backup your settings and history to your personal cloud storage.", style = MaterialTheme.typography.bodySmall)
-                    Spacer(modifier = Modifier.height(12.dp))
-
-                    if (driveError == "API_DISABLED") {
-                        Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer), modifier = Modifier.padding(bottom = 12.dp)) {
-                            Column(modifier = Modifier.padding(12.dp)) {
-                                Text("ACTION REQUIRED", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.error)
-                                Text("Google Drive API is disabled in your cloud project. This is why sync is failing.", style = MaterialTheme.typography.bodySmall)
-                                Button(
-                                    onClick = { 
-                                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://console.developers.google.com/apis/api/drive.googleapis.com/overview?project=38581640934"))
-                                        context.startActivity(intent)
-                                    },
-                                    modifier = Modifier.padding(top = 8.dp).fillMaxWidth(),
-                                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
-                                ) {
-                                    Text("Enable Drive API Now")
-                                }
-                            }
-                        }
-                    }
-                    
-                    if (isDriveConnected) {
-                        Column(modifier = Modifier.fillMaxWidth()) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(Icons.Default.CloudDone, contentDescription = null, tint = Color.Green, modifier = Modifier.size(24.dp))
-                                Spacer(modifier = Modifier.width(12.dp))
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(text = "Connected", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold, color = Color.Green)
-                                    Text(text = settings.googleAccountEmail ?: "Active Account", style = MaterialTheme.typography.bodySmall, color = Color.LightGray)
-                                }
-                                TextButton(
-                                    onClick = { 
-                                        val gso = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN).build()
-                                        val client = GoogleSignIn.getClient(context, gso)
-                                        client.signOut().addOnCompleteListener { viewModel.disconnectGoogleDrive() }
-                                    }
-                                ) {
-                                    Text("Sign Out", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelMedium)
-                                }
-                            }
-                        }
-                        Row(modifier = Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Button(
-                                onClick = { viewModel.triggerAutoBackup() }, 
-                                modifier = Modifier.weight(1f), 
-                                colors = ButtonDefaults.buttonColors(containerColor = ActionBlue, contentColor = Color.White)
-                            ) {
-                                Icon(Icons.Default.CloudQueue, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text("Sync Now", style = MaterialTheme.typography.labelSmall)
-                            }
-                            Button(
-                                onClick = { viewModel.triggerCloudRestore() }, 
-                                modifier = Modifier.weight(1f),
-                                colors = ButtonDefaults.buttonColors(containerColor = ActionBlue, contentColor = Color.White)
-                            ) {
-                                Icon(Icons.Default.CloudDownload, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text("Restore", style = MaterialTheme.typography.labelSmall)
-                            }
-                        }
-                        if (isBackupActive) LinearProgressIndicator(modifier = Modifier.fillMaxWidth().height(2.dp).padding(top = 4.dp), color = Color.Green, trackColor = Color.Transparent)
-                    } else {
-                        Button(
-                            onClick = { 
-                                isConnectingGoogle = true
-                                val gso = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN).requestEmail().requestScopes(Scope("https://www.googleapis.com/auth/drive.file")).build()
-                                val client = GoogleSignIn.getClient(context, gso)
-                                client.signOut().addOnCompleteListener { googleSignInLauncher.launch(client.signInIntent) }
-                            },
-                            modifier = Modifier.fillMaxWidth(),
-                            enabled = !isConnectingGoogle,
-                            colors = ButtonDefaults.buttonColors(containerColor = ActionBlue, contentColor = Color.White)
-                        ) {
-                            if (isConnectingGoogle) {
-                                CircularProgressIndicator(modifier = Modifier.size(16.dp), color = Color.White, strokeWidth = 2.dp)
-                                Spacer(modifier = Modifier.width(8.dp)); Text("Connecting...")
-                            } else Text("Sign in with Google")
                         }
                     }
                 }
@@ -564,9 +565,19 @@ fun SettingsScreen(viewModel: MainViewModel) {
             val clipboard = LocalClipboardManager.current
             Card(colors = CardDefaults.cardColors(containerColor = Color.Black), modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.padding(12.dp)) {
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
                         Text("Backend Activity", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
-                        Row {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("Debug", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+                            Switch(
+                                checked = settings.debugEnabled,
+                                onCheckedChange = { viewModel.updateDebugEnabled(it) },
+                                modifier = Modifier.scale(0.6f).padding(horizontal = 4.dp)
+                            )
                             TextButton(onClick = { 
                                 val text = consoleLogs.joinToString("\n") { "[${it.formattedTime}] ${it.tag}: ${it.message}" }
                                 if (text.isNotBlank()) { clipboard.setText(AnnotatedString(text)); Toast.makeText(context, "Logs copied", Toast.LENGTH_SHORT).show() }

@@ -26,6 +26,10 @@ interface CallGuardShieldDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertBlacklistEntry(entry: BlacklistEntry)
 
+    @Transaction
+    @Query("SELECT * FROM blacklist")
+    fun getEnrichedBlacklist(): Flow<List<EnrichedBlacklist>>
+
     @Query("SELECT * FROM blacklist")
     fun getBlacklist(): Flow<List<BlacklistEntry>>
 
@@ -47,6 +51,10 @@ interface CallGuardShieldDao {
     // Whitelist
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertWhitelistEntry(entry: WhitelistEntry)
+
+    @Transaction
+    @Query("SELECT * FROM whitelist")
+    fun getEnrichedWhitelist(): Flow<List<EnrichedWhitelist>>
 
     @Query("SELECT * FROM whitelist")
     fun getWhitelist(): Flow<List<WhitelistEntry>>
@@ -121,11 +129,24 @@ interface CallGuardShieldDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertCallLogEntry(entry: CallLogEntry): Long
 
+    @Transaction
+    suspend fun insertAndTrimCallLog(entry: CallLogEntry) {
+        insertCallLogEntry(entry)
+        trimCallLog(100)
+    }
+
+    @Transaction
+    @Query("SELECT * FROM call_log ORDER BY timestamp DESC")
+    fun getAllEnrichedCallLogs(): Flow<List<EnrichedCallLog>>
+
     @Query("SELECT * FROM call_log ORDER BY timestamp DESC")
     fun getAllCallLogs(): Flow<List<CallLogEntry>>
 
     @Query("SELECT * FROM call_log")
     suspend fun getAllCallLogsSync(): List<CallLogEntry>
+
+    @Query("SELECT number, COUNT(*) as count, MAX(timestamp) as lastTimestamp, GROUP_CONCAT(timestamp) as csvTimestamps FROM call_log GROUP BY number ORDER BY lastTimestamp DESC")
+    fun getRawGroupedLogs(): Flow<List<RawGroupedLog>>
 
     @Query("DELETE FROM call_log WHERE id = :id")
     suspend fun deleteCallLogById(id: Long)
@@ -135,6 +156,9 @@ interface CallGuardShieldDao {
 
     @Query("DELETE FROM call_log")
     suspend fun deleteAllCallLogs()
+
+    @Query("DELETE FROM call_log WHERE number = :number")
+    suspend fun deleteCallLogByNumber(number: String)
 
     @Query("DELETE FROM call_log WHERE id NOT IN (SELECT id FROM call_log ORDER BY timestamp DESC LIMIT :limit)")
     suspend fun trimCallLog(limit: Int)
@@ -163,6 +187,9 @@ interface CallGuardShieldDao {
 
     @Query("DELETE FROM phone_lookup_cache WHERE phoneNumber = :number")
     suspend fun deleteLookupResult(number: String)
+
+    @Query("SELECT * FROM phone_lookup_cache")
+    fun getAllLookupResultsFlow(): Flow<List<PhoneLookupResult>>
 
     @Query("SELECT * FROM phone_lookup_cache")
     suspend fun getAllLookupResultsSync(): List<PhoneLookupResult>

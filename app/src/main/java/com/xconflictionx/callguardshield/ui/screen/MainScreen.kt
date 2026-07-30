@@ -12,7 +12,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.xconflictionx.callguardshield.ui.UiEvent
 import com.xconflictionx.callguardshield.ui.MainViewModel
 import com.xconflictionx.callguardshield.ui.component.SecurityStatusSheet
 import java.text.SimpleDateFormat
@@ -21,10 +20,10 @@ import java.util.*
 @Composable
 fun MainScreen(viewModel: MainViewModel, onNavigateToHistory: () -> Unit) {
     val settings by viewModel.settings.collectAsState()
-    val callLogs by viewModel.callLogs.collectAsState()
+    val groupedLogs by viewModel.groupedCallLogs.collectAsState()
     val isSyncing by viewModel.isSyncing.collectAsState()
-    val blacklist by viewModel.blacklist.collectAsState()
-    val whitelist by viewModel.whitelist.collectAsState()
+    val blacklist by viewModel.blacklistFull.collectAsState()
+    val whitelist by viewModel.whitelistFull.collectAsState()
     val globalSpamCount by viewModel.globalSpamCount.collectAsState()
     
     var showSecuritySheet by remember { mutableStateOf(false) }
@@ -36,7 +35,7 @@ fun MainScreen(viewModel: MainViewModel, onNavigateToHistory: () -> Unit) {
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        val isPaused = settings?.isPaused ?: false
+        val isPaused = settings.isPaused
         
         Text(
             text = "Firewall Status",
@@ -81,9 +80,9 @@ fun MainScreen(viewModel: MainViewModel, onNavigateToHistory: () -> Unit) {
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Column(modifier = Modifier.weight(1f)) {
-                    val blockedCount = callLogs.count { it.isBlocked }
+                    val totalBlocked = groupedLogs.filter { it.isBlocked }.sumOf { it.count }
                     Text("Firewall Activity", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                    Text("$blockedCount threats neutralized", style = MaterialTheme.typography.bodyMedium)
+                    Text("$totalBlocked threats neutralized", style = MaterialTheme.typography.bodyMedium)
                 }
                 Icon(Icons.Default.Block, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
             }

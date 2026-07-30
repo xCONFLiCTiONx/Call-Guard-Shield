@@ -94,8 +94,6 @@
             </intent-filter>
 
             <meta-data android:name="android.telecom.DIALER_NAME" android:value="Call Guard Shield" />
-
-            <meta-data android:name="android.app.shortcuts" android:resource="@xml/shortcuts" />
         </activity>
     </application>
 

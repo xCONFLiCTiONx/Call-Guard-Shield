@@ -1,6 +1,5 @@
 package com.xconflictionx.callguardshield.logic
 
-import android.content.Context
 import com.google.gson.Gson
 import com.xconflictionx.callguardshield.data.entity.PhoneLookupResult
 import com.xconflictionx.callguardshield.ui.LogLevel
@@ -13,12 +12,13 @@ import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 import retrofit2.http.*
 import java.util.concurrent.TimeUnit
+import kotlin.time.Duration.Companion.milliseconds
 
 class GeminiPhoneLookupService(
-    private val context: Context,
     private val apiKey: String,
     private val modelName: String,
-    private val dao: com.xconflictionx.callguardshield.data.dao.CallGuardShieldDao
+    private val dao: com.xconflictionx.callguardshield.data.dao.CallGuardShieldDao,
+    private val isDebugEnabled: Boolean = false
 ) {
     companion object {
         suspend fun testApiKey(apiKey: String): Boolean {
@@ -54,9 +54,11 @@ class GeminiPhoneLookupService(
                 val response = service.listModels(apiKey)
                 val models = response.models?.map { it.name.removePrefix("models/") } ?: emptyList()
                 
-                models.filter { it.contains("flash") || it.contains("pro") }
+                models.asSequence()
+                    .filter { it.contains("flash") || it.contains("pro") }
                     .filter { !it.contains("vision") && !it.contains("experimental") }
                     .sortedByDescending { it.contains("flash") }
+                    .toList()
             } catch (e: Exception) {
                 emptyList()
             }
@@ -129,7 +131,7 @@ class GeminiPhoneLookupService(
             val cached = dao.getLookupResult(number)
             if (cached != null) {
                 val age = System.currentTimeMillis() - cached.lookupDate
-                if (age < 30L * 24 * 60 * 60 * 1000) return@withContext cached.copy(isCached = true)
+                if (age < (30L * 24 * 60 * 60 * 1000)) return@withContext cached.copy(isCached = true)
             }
         }
 
@@ -169,7 +171,7 @@ class GeminiPhoneLookupService(
         repeat(3) { i ->
             StatusManager.setGeminiStage("Thorough Scan (Stage ${i + 1}/3)")
             executeSingleModelRequest(prompt, number, searchMode = true)?.let { results.add(it) }
-            if (i < 2) delay(1000) // Small breather between heavy deep scans
+            if (i < 2) delay(1000.milliseconds) // Small breather between heavy deep scans
         }
         
         if (results.isEmpty()) return@withContext null
@@ -194,6 +196,7 @@ class GeminiPhoneLookupService(
         result
     }
 
+    @Suppress("UNCHECKED_CAST")
     private suspend fun executeSingleModelRequest(prompt: String, number: String, searchMode: Boolean): PhoneLookupResult? {
         val cleanModelName = modelName.removePrefix("models/").ifBlank { "gemini-3.1-flash-lite" }
         val versions = listOf("v1", "v1beta")
@@ -210,60 +213,30 @@ class GeminiPhoneLookupService(
             try {
                 val response = api.generateContent(url, request)
                 val json = response.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text ?: continue
-                val cleanJson = json.trim().removePrefix("```json").removeSuffix("```").trim()
                 
-                // Parsing logic to handle whole numbers (0-100) vs decimals (0.0-1.0)
-                val gson = Gson()
-                val map = gson.fromJson(cleanJson, Map::class.java)
-                
-                // Extract accuracy/confidence field
-                val rawAcc = map["accuracy"] ?: map["confidence"] ?: 0.0
-                val parsedAcc = when (rawAcc) {
-                    is Number -> {
-                        val v = rawAcc.toDouble()
-                        if (v <= 1.0 && v > 0) (v * 100).toInt() else v.toInt()
-                    }
-                    else -> 0
-                }.coerceIn(0, 100)
+                if (isDebugEnabled) {
+                    ConsoleLogger.log("GEMINI_RAW", json, LogLevel.INFO)
+                }
 
-                val result = gson.fromJson(cleanJson, PhoneLookupResult::class.java)
-
-                return result.copy(
-                    phoneNumber = number, 
-                    accuracy = parsedAcc,
-                    lookupDate = System.currentTimeMillis()
-                )
+                return parseManualJson(json, number)
 
             } catch (e: Exception) {
                 val code = (e as? HttpException)?.code()
                 if (code == 429 && searchMode) {
-                    delay(2500)
+                    delay(2500.milliseconds)
                     continue 
                 }
                 if (code == 503) {
-                    delay(2000)
+                    delay(2000.milliseconds)
                     try {
                         val retryResponse = api.generateContent(url, request)
                         val retryJson = retryResponse.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text ?: continue
-                        val retryCleanJson = retryJson.trim().removePrefix("```json").removeSuffix("```").trim()
                         
-                        val gson = Gson()
-                        val map = gson.fromJson(retryCleanJson, Map::class.java)
-                        val rawAcc = map["accuracy"] ?: map["confidence"] ?: 0.0
-                        val parsedAcc = when (rawAcc) {
-                            is Number -> {
-                                val v = rawAcc.toDouble()
-                                if (v <= 1.0 && v > 0) (v * 100).toInt() else v.toInt()
-                            }
-                            else -> 0
-                        }.coerceIn(0, 100)
+                        if (isDebugEnabled) {
+                            ConsoleLogger.log("GEMINI_RAW", retryJson, LogLevel.INFO)
+                        }
 
-                        val retryResult = gson.fromJson(retryCleanJson, PhoneLookupResult::class.java)
-                        return retryResult.copy(
-                            phoneNumber = number, 
-                            accuracy = parsedAcc,
-                            lookupDate = System.currentTimeMillis()
-                        )
+                        return parseManualJson(retryJson, number)
                     } catch (re: Exception) {
                         break 
                     }
@@ -277,6 +250,67 @@ class GeminiPhoneLookupService(
             }
         }
         return null
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    private fun parseManualJson(rawJson: String, number: String): PhoneLookupResult? {
+        val cleanJson = rawJson.trim().removePrefix("```json").removeSuffix("```").trim()
+        val gson = Gson()
+        
+        return try {
+            val map = gson.fromJson(cleanJson, Map::class.java) as Map<String, Any?>
+            
+            // Deep Extraction logic for accuracy/confidence with support for multiple formats
+            val possibleKeys = listOf("accuracy", "confidence", "confidence_score", "score", "fraud_score", "identity_match", "rating")
+            var rawValue: Any? = null
+            for (key in possibleKeys) {
+                if (map.containsKey(key)) {
+                    rawValue = map[key]
+                    break
+                }
+            }
+            
+            val parsedAcc = when (rawValue) {
+                is Number -> {
+                    val v = rawValue.toDouble()
+                    // If it's a decimal like 0.95, scale it to 95. If it's a whole number like 95, keep it.
+                    if (v > 0.0 && v <= 1.0) (v * 100).toInt() else v.toInt()
+                }
+                is String -> {
+                    // Handle formats like "90/100", "95%", "0.85", or "85"
+                    val cleanStr = rawValue.trim().replace("%", "")
+                    if (cleanStr.contains("/")) {
+                        val parts = cleanStr.split("/")
+                        val num = parts[0].toDoubleOrNull() ?: 0.0
+                        val den = parts[1].toDoubleOrNull() ?: 100.0
+                        ((num / den) * 100).toInt()
+                    } else {
+                        val v = cleanStr.toDoubleOrNull() ?: 0.0
+                        if (v > 0.0 && v <= 1.0) (v * 100).toInt() else v.toInt()
+                    }
+                }
+                else -> 0
+            }.coerceIn(0, 100)
+
+            PhoneLookupResult(
+                phoneNumber = number,
+                ownerName = map["ownerName"] as? String,
+                companyName = map["companyName"] as? String,
+                category = (map["category"] as? String) ?: "Unknown",
+                accuracy = parsedAcc,
+                spam = (map["spam"] as? Boolean) ?: (map["spam"]?.toString()?.toBoolean()) ?: false,
+                scam = (map["scam"] as? Boolean) ?: (map["scam"]?.toString()?.toBoolean()) ?: false,
+                debtCollector = (map["debtCollector"] as? Boolean) ?: (map["debtCollector"]?.toString()?.toBoolean()) ?: false,
+                telemarketer = (map["telemarketer"] as? Boolean) ?: (map["telemarketer"]?.toString()?.toBoolean()) ?: false,
+                summary = map["summary"] as? String,
+                evidence = (map["evidence"] as? List<*>)?.filterIsInstance<String>(),
+                sources = (map["sources"] as? List<*>)?.filterIsInstance<String>(),
+                lookupDate = System.currentTimeMillis()
+            )
+        } catch (e: Exception) {
+            ConsoleLogger.log("PARSER", "Failed to parse manual JSON: ${e.message}", LogLevel.ERROR)
+            null
+        }
     }
 
     data class GeminiRequest(

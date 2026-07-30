@@ -4,42 +4,40 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.provider.ContactsContract
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.DeleteSweep
-import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.xconflictionx.callguardshield.data.entity.CallLogEntry
 import com.xconflictionx.callguardshield.ui.MainViewModel
 import com.xconflictionx.callguardshield.ui.component.NumberActionMenu
 import com.xconflictionx.callguardshield.ui.component.NumberDetailsSheet
 import com.xconflictionx.callguardshield.ui.component.EditNumberDetailsDialog
-import java.text.SimpleDateFormat
-import java.util.*
+import com.xconflictionx.callguardshield.ui.component.NumberItemCard
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HistoryScreen(viewModel: MainViewModel) {
-    val logs by viewModel.callLogs.collectAsState()
+    val logs by viewModel.groupedCallLogs.collectAsState()
     val selectedNumberIntel by viewModel.selectedNumberIntel.collectAsState()
     val foregroundNumber by viewModel.foregroundNumber.collectAsState()
     val context = LocalContext.current
-    var selectedItem by remember { mutableStateOf<Pair<String, String?>?>(null) }
+    
+    var selectedIndex by remember { mutableIntStateOf(-1) }
     var showSettings by remember { mutableStateOf(false) }
     var showDetailsEditor by remember { mutableStateOf(false) }
     var showClearDialog by remember { mutableStateOf(false) }
+
+    val selectedEntry = if (selectedIndex in logs.indices) logs[selectedIndex] else null
 
     Scaffold(
         topBar = {
@@ -63,17 +61,37 @@ fun HistoryScreen(viewModel: MainViewModel) {
             }
 
             LazyColumn(modifier = Modifier.fillMaxSize()) {
-                items(logs) { log ->
-                    CallLogItem(
-                        log = log,
+                itemsIndexed(logs) { index, entry ->
+                    NumberItemCard(
+                        headline = entry.headline,
+                        subhead = if (entry.headline != entry.number) entry.number else null,
+                        ownerName = entry.intel?.ownerName,
+                        companyName = entry.intel?.companyName,
+                        timestamp = entry.lastTimestamp,
+                        isBlocked = entry.isBlocked,
+                        callerInfo = entry.formattedInfo,
                         onClick = { 
-                            selectedItem = log.number to (log.callerName ?: log.callerId ?: "Unknown")
+                            selectedIndex = index
                             showSettings = false
-                            // Load the full Gemini intel for this number
-                            viewModel.fetchIntelForNumber(log.number)
+                            showDetailsEditor = false
+                            viewModel.fetchIntelForNumber(entry.number)
+                        },
+                        actionSlot = {
+                            if (entry.count > 0) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = "Calls: x${entry.count}",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
                         }
                     )
-                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = Color.Gray.copy(alpha = 0.2f))
                 }
             }
 
@@ -102,225 +120,72 @@ fun HistoryScreen(viewModel: MainViewModel) {
             }
 
             // Show Details Sheet first (primary view)
-            if (!showSettings && selectedItem != null) {
-                val (number, label) = selectedItem!!
+            if (!showSettings && !showDetailsEditor && selectedEntry != null) {
                 NumberDetailsSheet(
                     viewModel = viewModel,
-                    number = number,
-                    label = label,
+                    number = selectedEntry.number,
+                    label = selectedEntry.headline,
                     intelResult = selectedNumberIntel,
-                    isThisNumberIdentifying = foregroundNumber == number,
-                    onDismiss = { selectedItem = null },
+                    isThisNumberIdentifying = foregroundNumber == selectedEntry.number,
+                    onDismiss = { selectedIndex = -1 },
                     onOpenSettings = { showSettings = true },
                     onIdentify = {
-                        viewModel.performInvestigation(number)
-                    }
+                        viewModel.performInvestigation(selectedEntry.number)
+                    },
+                    onNavigatePrevious = if (selectedIndex > 0) {
+                        {
+                            selectedIndex--
+                            viewModel.fetchIntelForNumber(logs[selectedIndex].number)
+                        }
+                    } else null,
+                    onNavigateNext = if (selectedIndex < logs.size - 1) {
+                        {
+                            selectedIndex++
+                            viewModel.fetchIntelForNumber(logs[selectedIndex].number)
+                        }
+                    } else null
                 )
             }
 
             // Show Settings/Actions Menu (opened from Details Sheet)
-            if (showSettings && selectedItem != null) {
-                val (number, label) = selectedItem!!
-                val logEntry = logs.find { it.number == number }
+            if (showSettings && selectedEntry != null) {
                 NumberActionMenu(
                     viewModel = viewModel,
-                    number = number,
-                    label = label,
+                    number = selectedEntry.number,
+                    label = selectedEntry.headline,
                     onDismiss = { showSettings = false },
                     onIdentify = {
-                        viewModel.performInvestigation(number)
+                        viewModel.performInvestigation(selectedEntry.number)
                     },
-                    onAddToWhitelist = { viewModel.addToWhitelist(number, it) },
-                    onAddToBlacklist = { viewModel.addToBlacklist(number, it) },
+                    onAddToWhitelist = { viewModel.addToWhitelist(selectedEntry.number, it) },
+                    onAddToBlacklist = { viewModel.addToBlacklist(selectedEntry.number, it) },
                     onRemoveFromList = { 
-                        logEntry?.let { entry ->
-                            // Find next item before deleting
-                            val index = logs.indexOf(entry)
-                            if (index != -1 && logs.size > 1) {
-                                val nextIndex = if (index < logs.size - 1) index + 1 else index - 1
-                                val nextLog = logs[nextIndex]
-                                selectedItem = nextLog.number to (nextLog.callerName ?: nextLog.callerId ?: "Unknown")
-                                viewModel.fetchIntelForNumber(nextLog.number)
-                            } else {
-                                selectedItem = null
-                            }
-                            viewModel.deleteCallLogEntry(entry)
-                        }
+                        viewModel.deleteNumberFromHistory(selectedEntry.number)
+                        selectedIndex = -1
                     },
-                    removeLabel = "Delete from History",
+                    removeLabel = "Remove Entry",
                     onEditLabel = {
                         showSettings = false
                         showDetailsEditor = true
                     },
-                    onAddToContacts = { launchAddContactIntent(context, number) },
-                    onCall = { launchCallIntent(context, number) }
+                    onAddToContacts = { launchAddContactIntent(context, selectedEntry.number) },
+                    onCall = { launchCallIntent(context, selectedEntry.number) }
                 )
             }
 
-            if (showDetailsEditor && selectedItem != null) {
-                val (number, _) = selectedItem!!
+            if (showDetailsEditor && selectedEntry != null) {
                 EditNumberDetailsDialog(
-                    number = number,
+                    number = selectedEntry.number,
                     initialIntel = selectedNumberIntel,
                     onDismiss = { 
                         showDetailsEditor = false
-                        selectedItem = null
+                        selectedIndex = -1
                     },
                     onConfirm = { oldNum, updatedIntel ->
-                        viewModel.updateFullNumberDetails(oldNum, updatedIntel, null)
+                        viewModel.updateFullNumberDetails(oldNum, updatedIntel)
                         showDetailsEditor = false
-                        selectedItem = null
+                        selectedIndex = -1
                     }
-                )
-            }
-        }
-    }
-}
-
-@Composable
-fun CallLogItem(
-    log: CallLogEntry,
-    onClick: () -> Unit
-) {
-    val locale = LocalConfiguration.current.locales[0]
-    val date = SimpleDateFormat("MMM dd, HH:mm", locale).format(Date(log.timestamp))
-    
-    val headline = log.callerName ?: log.number
-    val showNumberInSub = headline != log.number
-
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 8.dp)
-            .clickable { onClick() },
-        colors = CardDefaults.cardColors(
-            containerColor = if (log.isBlocked) MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.1f) 
-                            else MaterialTheme.colorScheme.surface
-        )
-    ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = headline,
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.Bold,
-                        color = if (headline == log.number) MaterialTheme.colorScheme.onSurface 
-                                else MaterialTheme.colorScheme.primary
-                    )
-                    
-                    if (showNumberInSub) {
-                        Text(
-                            text = log.number,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = Color.Gray
-                        )
-                    }
-
-                    // Multi-line Identity details
-                    if (log.ownerName != null || log.companyName != null) {
-                        Spacer(modifier = Modifier.height(4.dp))
-                        if (log.ownerName != null) {
-                            Text(
-                                text = "Name: ${log.ownerName}",
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                        if (log.companyName != null) {
-                            Text(
-                                text = "Business: ${log.companyName}",
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    } else if (log.isContact) {
-                        Text(
-                            text = "Verified Contact",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = Color(0xFF4CAF50),
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-
-                    // Carrier ID
-                    if (!log.callerId.isNullOrBlank() && log.callerId != log.number) {
-                        Text(
-                            text = "Carrier ID: ${log.callerId}",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = Color.Gray
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = date,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = Color.Gray
-                    )
-                }
-                
-                Column(horizontalAlignment = Alignment.End) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        if (log.isBlocked) {
-                            Surface(
-                                color = MaterialTheme.colorScheme.error,
-                                shape = MaterialTheme.shapes.small
-                            ) {
-                                Text(
-                                    text = "BLOCKED",
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onError,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
-                        } else {
-                            Surface(
-                                color = Color.Green.copy(alpha = 0.2f),
-                                shape = MaterialTheme.shapes.small
-                            ) {
-                                Text(
-                                    text = "ALLOWED",
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = Color.Green,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
-                        }
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Icon(Icons.Default.MoreVert, contentDescription = "Menu", tint = Color.Gray)
-                    }
-                }
-            }
-            
-            // Technical Intel Footer (Risk/Accuracy)
-            if (!log.callerInfo.isNullOrBlank()) {
-                Spacer(modifier = Modifier.height(8.dp))
-                Surface(
-                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
-                    shape = MaterialTheme.shapes.extraSmall
-                ) {
-                    Text(
-                        text = log.callerInfo,
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
-
-            if (log.isBlocked && !log.reason.isNullOrBlank()) {
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = "Reason: ${log.reason}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.error
                 )
             }
         }

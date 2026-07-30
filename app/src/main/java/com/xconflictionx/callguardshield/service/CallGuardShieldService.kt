@@ -47,7 +47,7 @@ class CallGuardShieldService : CallScreeningService() {
                     if (!apiKey.isNullOrBlank()) {
                         // Start the scan immediately
                         val scanJob = serviceScope.async {
-                            val service = GeminiPhoneLookupService(applicationContext, apiKey, settings.selectedGeminiModel, dao)
+                            val service = GeminiPhoneLookupService(apiKey, settings.selectedGeminiModel, dao, settings.debugEnabled)
                             service.lookupRealTime(phoneNumber)
                         }
 
@@ -110,8 +110,7 @@ class CallGuardShieldService : CallScreeningService() {
                     }
                 )
                 
-                dao.insertCallLogEntry(logEntry)
-                dao.trimCallLog(100)
+                dao.insertAndTrimCallLog(logEntry)
 
                 if (isBlocked) {
                     responseBuilder.apply {

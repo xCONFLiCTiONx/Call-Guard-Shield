@@ -28,12 +28,10 @@ import com.xconflictionx.callguardshield.ui.theme.CallGuardShieldTheme
 
 class MainActivity : ComponentActivity() {
     private val roleRequestLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { }
-    private val intentState = mutableStateOf<Intent?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         installSplashScreen()
         super.onCreate(savedInstanceState)
-        intentState.value = intent
         enableEdgeToEdge()
         setContent {
             val context = LocalContext.current
@@ -50,7 +48,7 @@ class MainActivity : ComponentActivity() {
                         }
                     )
                 } else {
-                    MainApp(viewModel, intentState.value)
+                    MainApp(viewModel)
                 }
             }
         }
@@ -59,7 +57,6 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        intentState.value = intent
     }
 
     private fun requestCallScreeningRole() {
@@ -76,7 +73,7 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-fun MainApp(viewModel: MainViewModel, initialIntent: Intent? = null) {
+fun MainApp(viewModel: MainViewModel) {
     val navController = rememberNavController()
     val context = LocalContext.current
 
@@ -103,19 +100,6 @@ fun MainApp(viewModel: MainViewModel, initialIntent: Intent? = null) {
             when (event) {
                 is com.xconflictionx.callguardshield.ui.UiEvent.ShowToast -> {
                     android.widget.Toast.makeText(context, event.message, android.widget.Toast.LENGTH_SHORT).show()
-                }
-            }
-        }
-    }
-
-    // Handle App Shortcut and Notification Intents
-    LaunchedEffect(initialIntent) {
-        initialIntent?.let { intent ->
-            if (intent.getStringExtra("shortcut") == "history") {
-                navController.navigate("history") {
-                    popUpTo("history") { saveState = true }
-                    launchSingleTop = true
-                    restoreState = true
                 }
             }
         }

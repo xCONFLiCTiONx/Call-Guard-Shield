@@ -2,11 +2,9 @@ package com.xconflictionx.callguardshield.ui
 
 import android.app.Application
 import android.net.Uri
-import android.util.Log
 import android.content.Context
 import android.content.Intent
 import android.provider.Settings
-import android.provider.Telephony
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.work.*
@@ -27,10 +25,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.withTimeout
 import java.util.Scanner
-import java.util.UUID
 import androidx.core.content.ContextCompat
-
-data class AutoQuery(val number: String, val label: String?)
+import kotlin.time.Duration.Companion.milliseconds
 
 sealed class UiEvent {
     data class ShowToast(val message: String) : UiEvent()
@@ -40,21 +36,114 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val db = AppDatabase.getDatabase(application)
     private val dao = db.callGuardShieldDao()
     private val settingsRepo = SettingsRepository(application)
-    private val contactRepo = ContactRepository(application)
 
     // --- UI State Flows ---
 
     val settings = settingsRepo.settingsFlow.stateIn(
         viewModelScope,
         SharingStarted.Eagerly,
-        UserSettings(false, false, false, false, false, false, emptySet(), false, 0L, 0L, false, 30, "gemini-3.1-flash-lite", false, false, false, 90, null, false, false)
+        UserSettings(
+            isPaused = false,
+            allowOnlyContacts = false,
+            blockUnknown = false,
+            blockOutOfState = false,
+            blockInternational = false,
+            firstRunSyncComplete = false,
+            enabledDictionaries = emptySet(),
+            showContactsInHistory = false,
+            lastSyncTime = 0L,
+            lastMaintenanceTime = 0L,
+            autoMaintenanceEnabled = false,
+            cacheAgeDays = 30,
+            selectedGeminiModel = "gemini-3.1-flash-lite",
+            aiRealTimeBlocking = false,
+            blockDebtCollectors = false,
+            blockTelemarketers = false,
+            aiBlockingAccuracy = 90,
+            googleAccountEmail = null,
+            whitelistEnabled = false,
+            blacklistEnabled = false,
+            debugEnabled = false
+        )
     )
 
-    val callLogs = dao.getAllCallLogs().stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
     val blacklist = dao.getBlacklist().stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
     val whitelist = dao.getWhitelist().stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+    private val lookupCache = dao.getAllLookupResultsFlow()
+    private val rawGroupedLogs = dao.getRawGroupedLogs()
+
+    // Unified helper for enriching any list of numbers with intel and call stats
+    private fun enrichList(
+        numbers: List<String>,
+        labels: Map<String, String?>,
+        stats: List<RawGroupedLog>,
+        bl: List<BlacklistEntry>,
+        wl: List<WhitelistEntry>,
+        cache: List<PhoneLookupResult>
+    ): List<GroupedEnrichedCallLog> {
+        return numbers.map { num ->
+            val intel = cache.find { it.phoneNumber == num }
+            val stat = stats.find { it.number == num }
+            val inBl = bl.any { it.pattern == num }
+            val inWl = wl.any { it.number == num }
+            val rawLabel = labels[num]
+            
+            val headline = intel?.manualLabel 
+                ?: rawLabel
+                ?: intel?.companyName 
+                ?: intel?.ownerName 
+                ?: when {
+                    intel?.scam == true -> "Confirmed Scam"
+                    intel?.spam == true -> "Potential Spam"
+                    intel?.debtCollector == true -> "Debt Collector"
+                    intel?.telemarketer == true -> "Telemarketer"
+                    else -> num
+                }
+
+            val formattedInfo = intel?.let { res ->
+                buildString {
+                    append("Risk: ${if (res.scam) "HIGH" else if (res.spam) "MEDIUM" else "LOW"} • ")
+                    append("Accuracy: ${res.accuracy}% • ")
+                    append(res.summary?.take(60))
+                }
+            }
+
+            GroupedEnrichedCallLog(
+                number = num,
+                label = rawLabel,
+                count = stat?.count ?: 0,
+                lastTimestamp = stat?.lastTimestamp ?: 0L,
+                allTimestamps = stat?.csvTimestamps?.split(",")?.mapNotNull { it.toLongOrNull() } ?: emptyList(),
+                headline = headline,
+                formattedInfo = formattedInfo,
+                isBlocked = intel?.scam == true || intel?.spam == true || inBl,
+                isContact = false,
+                isInBlacklist = inBl,
+                isInWhitelist = inWl,
+                intel = intel
+            )
+        }
+    }
+
+    val blacklistFull = combine(blacklist, rawGroupedLogs, whitelist, lookupCache) { bl, stats, wl, cache ->
+        enrichList(bl.map { it.pattern }, bl.associate { it.pattern to it.label }, stats, bl, wl, cache)
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val whitelistFull = combine(whitelist, rawGroupedLogs, blacklist, lookupCache) { wl, stats, bl, cache ->
+        enrichList(wl.map { it.number }, wl.associate { it.number to it.label }, stats, bl, wl, cache)
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    // Enriched & Grouped Call Logs
+    val groupedCallLogs = combine(
+        dao.getRawGroupedLogs(),
+        blacklist,
+        whitelist,
+        lookupCache
+    ) { rawLogs, bl, wl, cache ->
+        enrichList(rawLogs.map { it.number }, emptyMap(), rawLogs, bl, wl, cache)
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
     val globalSpamCount = dao.getGlobalSpamCount().stateIn(viewModelScope, SharingStarted.Eagerly, 0)
-    val allGlobalSpam = dao.getAllGlobalSpamEntries().stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     private val _isSyncing = MutableStateFlow(false)
     val isSyncing = _isSyncing.asStateFlow()
@@ -74,14 +163,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _consoleLogs = MutableStateFlow<List<ConsoleEntry>>(emptyList())
     val consoleLogs = _consoleLogs.asStateFlow()
 
-    private val _chatMessages = MutableStateFlow<List<ChatEntry>>(emptyList())
-    val chatMessages = _chatMessages.asStateFlow()
-
     private val _isIdentifying = MutableStateFlow(false)
     val isIdentifying = _isIdentifying.asStateFlow()
-
-    private val _contactDetails = MutableStateFlow<Map<String, ContactDetails>>(emptyMap())
-    val contactDetails = _contactDetails.asStateFlow()
 
     private val _bulkProgress = MutableStateFlow<Float?>(null)
     val bulkProgress = _bulkProgress.asStateFlow()
@@ -112,20 +195,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun clearDriveError() { StatusManager.clearDriveError() }
 
-    val securitySuggestions = callLogs.map { logs ->
-        logs.filter { !it.isBlocked && !it.isContact }
-            .filter { log ->
-                val info = log.callerInfo?.lowercase() ?: ""
+    val securitySuggestions = groupedCallLogs.map { logs ->
+        logs.asSequence()
+            .filter { !it.isBlocked && !it.isContact }
+            .filter { entry ->
+                val info = entry.formattedInfo?.lowercase() ?: ""
                 info.contains("risk: high") || info.contains("risk: medium") || 
                 info.contains("scam") || info.contains("spam") ||
                 info.contains("debt collector") || info.contains("telemarketer")
             }
             .distinctBy { it.number }
             .take(5)
+            .toList()
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
-
-    private val _pendingAutoQuery = MutableStateFlow<AutoQuery?>(null)
-    val pendingAutoQuery = _pendingAutoQuery.asStateFlow()
 
     init {
         viewModelScope.launch {
@@ -150,12 +232,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun performInvestigation(number: String) {
         viewModelScope.launch {
-            _isIdentifying.value = true; _foregroundNumber.value = number; _pendingIntelResult.value = null; clearChat()
+            _isIdentifying.value = true; _foregroundNumber.value = number; _pendingIntelResult.value = null
             try {
                 val apiKey = CryptoManager.getGeminiApiKey(getApplication())
                 if (apiKey.isNullOrBlank()) return@launch
                 
-                withTimeout(25000) {
+                withTimeout(25000.milliseconds) {
                     val result = getLookupService().lookupFast(number)
                     if (result != null) {
                         handleNewIntelResult(number, result)
@@ -174,12 +256,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun performThoroughInvestigation(number: String) {
         viewModelScope.launch {
-            _isIdentifying.value = true; _foregroundNumber.value = number; _pendingIntelResult.value = null; clearChat()
+            _isIdentifying.value = true; _foregroundNumber.value = number; _pendingIntelResult.value = null
             try {
                 val apiKey = CryptoManager.getGeminiApiKey(getApplication())
                 if (apiKey.isNullOrBlank()) return@launch
                 
-                withTimeout(90000) { // Longer timeout for 3 scans
+                withTimeout(90000.milliseconds) { // Longer timeout for 3 scans
                     val result = getLookupDeepService().lookupThorough(number)
                     if (result != null) {
                         handleNewIntelResult(number, result)
@@ -205,10 +287,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (newAccuracy > currentAccuracy && currentResult?.manualLabel == null) {
             applyInvestigationResult(number, newResult)
             _selectedNumberIntel.value = newResult
-            addChatMessage(ChatEntry.IntelReport(newResult, wasAutoApplied = true, oldAccuracy = currentAccuracy))
-        } else {
-            // Wait for manual update via "Update Details" button
-            addChatMessage(ChatEntry.IntelReport(newResult, wasAutoApplied = false, oldAccuracy = currentAccuracy))
+            _pendingIntelResult.value = null // Clear pending if auto-saved
         }
     }
 
@@ -242,27 +321,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                new.accuracy != old.accuracy
     }
 
-    fun refineInvestigation(number: String) {
-        viewModelScope.launch {
-            _isIdentifying.value = true; _foregroundNumber.value = number; clearChat()
-            try {
-                val result = getLookupDeepService().lookupDeep(number)
-                if (result != null) {
-                    val current = dao.getLookupResult(number)
-                    val oldAcc = current?.accuracy ?: -1
-                    if (result.accuracy > oldAcc) {
-                        applyInvestigationResult(number, result); _selectedNumberIntel.value = result
-                        addChatMessage(ChatEntry.IntelReport(result, wasAutoApplied = true, oldAccuracy = oldAcc))
-                    } else addChatMessage(ChatEntry.IntelReport(result, wasAutoApplied = false, oldAccuracy = oldAcc))
-                }
-            } catch (e: Exception) { } finally { _isIdentifying.value = false; _foregroundNumber.value = null }
-        }
-    }
-
     fun performBulkInvestigation(isBlacklist: Boolean) {
         if (_isIdentifying.value) return
         viewModelScope.launch {
-            _isIdentifying.value = true; _bulkProgress.value = 0f; clearChat()
+            _isIdentifying.value = true; _bulkProgress.value = 0f
             try {
                 val list = if (isBlacklist) dao.getBlacklistSync() else dao.getWhitelistSync()
                 val total = list.size
@@ -277,8 +339,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         val current = dao.getLookupResult(number)
                         val oldAcc = current?.accuracy ?: -1
                         if (result.accuracy > oldAcc) {
-                            applyInvestigationResult(number, result); addChatMessage(ChatEntry.IntelReport(result, wasAutoApplied = true, oldAccuracy = oldAcc))
-                        } else addChatMessage(ChatEntry.IntelReport(result, wasAutoApplied = false, oldAccuracy = oldAcc))
+                            applyInvestigationResult(number, result)
+                        }
                     }
                     delay(500)
                 }
@@ -290,30 +352,23 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val normalized = PhoneHelper.normalizeToE164(number)
         dao.insertLookupResult(result)
         
-        // Label Priority: Manual -> Company -> Person -> Risk Status -> Unknown
+        // Push label updates back to manual tables for robustness
         val bestName = result.manualLabel 
             ?: result.companyName 
-            ?: result.ownerName 
-            ?: when {
-                result.scam -> "Confirmed Scam"
-                result.spam -> "Potential Spam"
-                result.debtCollector -> "Debt Collector"
-                result.telemarketer -> "Telemarketer"
-                else -> "Unknown"
-            }
+            ?: result.ownerName
         
-        val formattedInfo = buildString {
-            append("Risk: ${if (result.scam) "HIGH" else if (result.spam) "MEDIUM" else "LOW"} • ")
-            append("Accuracy: ${result.accuracy}% • ")
-            append(result.summary?.take(60))
+        if (bestName != null) {
+            dao.updateBlacklistLabelByNumber(normalized, bestName)
+            dao.updateWhitelistLabelByNumber(normalized, bestName)
         }
-        dao.updateCallLogByNumber(normalized, bestName, result.ownerName, result.companyName, formattedInfo)
-        
-        dao.updateBlacklistLabelByNumber(normalized, bestName)
-        dao.updateWhitelistLabelByNumber(normalized, bestName)
 
-        if ((result.scam || result.spam) && bestName != "Unknown") {
-            dao.insertBlacklistEntry(BlacklistEntry(pattern = normalized, label = bestName))
+        // List Exclusivity: If identified as spam/scam and Auto-save is happening, move from white to black
+        if (result.scam || result.spam) {
+            val n = PhoneHelper.normalizeToE164(number)
+            dao.deleteWhitelistByNumber(n)
+            if (bestName != null) {
+                dao.insertBlacklistEntry(BlacklistEntry(pattern = n, label = bestName))
+            }
         }
     }
 
@@ -447,6 +502,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun updateBlacklistEnabled(e: Boolean) { viewModelScope.launch { settingsRepo.updateBlacklistEnabled(e) } }
     fun updateSelectedModel(m: String) { viewModelScope.launch { settingsRepo.updateSelectedGeminiModel(m) } }
     fun updateAutoMaintenance(e: Boolean) { viewModelScope.launch { settingsRepo.updateAutoMaintenanceEnabled(e) } }
+    fun updateDebugEnabled(e: Boolean) { viewModelScope.launch { settingsRepo.updateDebugEnabled(e) } }
     fun saveGeminiKey(k: String) { 
         val trimmed = k.trim()
         viewModelScope.launch { 
@@ -478,8 +534,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         } catch (e: Exception) { }
     }
 
-    private fun getLookupService() = GeminiPhoneLookupService(getApplication(), CryptoManager.getGeminiApiKey(getApplication()) ?: "", settings.value.selectedGeminiModel, dao)
-    private fun getLookupDeepService() = GeminiPhoneLookupService(getApplication(), CryptoManager.getGeminiApiKey(getApplication()) ?: "", settings.value.selectedGeminiModel, dao)
+    private fun getLookupService() = GeminiPhoneLookupService(CryptoManager.getGeminiApiKey(getApplication()) ?: "", settings.value.selectedGeminiModel, dao, settings.value.debugEnabled)
+    private fun getLookupDeepService() = GeminiPhoneLookupService(CryptoManager.getGeminiApiKey(getApplication()) ?: "", settings.value.selectedGeminiModel, dao, settings.value.debugEnabled)
 
     fun fetchIntelForNumber(number: String) { 
         viewModelScope.launch { 
@@ -487,17 +543,38 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             _selectedNumberIntel.value = dao.getLookupResult(number) 
         } 
     }
-    fun addToWhitelist(number: String, label: String?) { viewModelScope.launch { val n = PhoneHelper.normalizeToE164(number); if (n.isNotBlank()) dao.insertWhitelistEntry(WhitelistEntry(number = n, label = label ?: "Manual")) } }
-    fun addToBlacklist(number: String, label: String?) { viewModelScope.launch { val n = PhoneHelper.normalizeToE164(number); if (n.isNotBlank()) dao.insertBlacklistEntry(BlacklistEntry(pattern = n, label = label ?: "Manual")) } }
-    fun updateFullNumberDetails(old: String, updated: PhoneLookupResult, label: String?) { viewModelScope.launch { dao.insertLookupResult(updated); _selectedNumberIntel.value = updated } }
+    fun addToWhitelist(number: String, label: String?) { 
+        viewModelScope.launch { 
+            val n = PhoneHelper.normalizeToE164(number)
+            if (n.isNotBlank()) {
+                dao.deleteBlacklistByPattern(n) // List Exclusivity
+                dao.insertWhitelistEntry(WhitelistEntry(number = n, label = label ?: "Manual")) 
+            }
+        } 
+    }
+    fun addToBlacklist(number: String, label: String?) { 
+        viewModelScope.launch { 
+            val n = PhoneHelper.normalizeToE164(number)
+            if (n.isNotBlank()) {
+                dao.deleteWhitelistByNumber(n) // List Exclusivity
+                dao.insertBlacklistEntry(BlacklistEntry(pattern = n, label = label ?: "Manual")) 
+            }
+        } 
+    }
+    fun updateFullNumberDetails(old: String, updated: PhoneLookupResult) { 
+        viewModelScope.launch { 
+            applyInvestigationResult(updated.phoneNumber, updated)
+            _selectedNumberIntel.value = updated 
+        } 
+    }
 
     fun logToConsole(tag: String, msg: String, lvl: LogLevel) { ConsoleLogger.log(tag, msg, lvl) }
     fun clearConsole() { ConsoleLogger.clear() }
     fun removeFromBlacklist(e: BlacklistEntry) { viewModelScope.launch { dao.deleteBlacklistEntry(e) } }
     fun removeFromWhitelist(e: WhitelistEntry) { viewModelScope.launch { dao.deleteWhitelistEntry(e) } }
-    fun clearHistory() { viewModelScope.launch { dao.clearCallLogs() } }
+    fun clearHistory() { viewModelScope.launch { dao.deleteAllCallLogs() } }
     fun deleteCallLogEntry(e: CallLogEntry) { viewModelScope.launch { dao.deleteCallLogEntry(e) } }
-    fun getAddContactIntent(num: String, name: String? = null) = contactRepo.getAddContactIntent(num, name)
+    fun deleteNumberFromHistory(number: String) { viewModelScope.launch { dao.deleteCallLogByNumber(number) } }
 
     fun getFullBackupData(onComplete: (String) -> Unit) {
         viewModelScope.launch {
@@ -568,29 +645,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun loadContactDetails(addresses: List<String>) {
-        viewModelScope.launch(Dispatchers.IO) {
-            val updated = _contactDetails.value.toMutableMap()
-            addresses.forEach { addr ->
-                if (!updated.containsKey(addr)) {
-                    contactRepo.getContactDetails(addr)?.let { updated[addr] = it }
-                }
-            }
-            _contactDetails.value = updated
-        }
-    }
-
-    fun addChatMessage(entry: ChatEntry) {
-        val current = _chatMessages.value.toMutableList()
-        current.add(entry)
-        _chatMessages.value = current
-    }
-
-    fun clearChat() { _chatMessages.value = emptyList() }
-
-    fun setAutoQuery(number: String, label: String?) { _pendingAutoQuery.value = AutoQuery(number, label) }
-    fun clearAutoQuery() { _pendingAutoQuery.value = null }
-
     private fun scheduleMonthlyMaintenance() {
         val workRequest = PeriodicWorkRequestBuilder<BulkIdentifyWorker>(
             30, java.util.concurrent.TimeUnit.DAYS
@@ -607,5 +661,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         WorkManager.getInstance(getApplication()).enqueueUniquePeriodicWork(
             "MonthlySpamSync", ExistingPeriodicWorkPolicy.KEEP, workRequest
         )
+    }
+
+    private fun addChatMessage(entry: ChatEntry) {
+        // Purged as requested
     }
 }

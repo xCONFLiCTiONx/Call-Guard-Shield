@@ -28,14 +28,18 @@ fun SecurityStatusSheet(
     val suggestions by viewModel.securitySuggestions.collectAsState()
     
     val dateFormatter = SimpleDateFormat("MMM dd, HH:mm", Locale.getDefault())
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        contentWindowInsets = { WindowInsets(0) },
         containerColor = MaterialTheme.colorScheme.surface
     ) {
         LazyColumn(
             modifier = Modifier
                 .fillMaxWidth()
+                .statusBarsPadding()
                 .padding(bottom = 32.dp),
             contentPadding = PaddingValues(24.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
@@ -148,7 +152,7 @@ fun SecurityStatusSheet(
                     ThreatSuggestionItem(
                         threat = threat,
                         onBlock = {
-                            viewModel.addToBlacklist(threat.number, threat.callerName ?: threat.ownerName ?: threat.companyName ?: "Spam")
+                            viewModel.addToBlacklist(threat.number, threat.headline)
                             onDismiss()
                         }
                     )
@@ -196,7 +200,7 @@ fun ShieldStatusItem(label: String, isActive: Boolean) {
 
 @Composable
 fun ThreatSuggestionItem(
-    threat: CallLogEntry,
+    threat: com.xconflictionx.callguardshield.data.entity.GroupedEnrichedCallLog,
     onBlock: () -> Unit
 ) {
     Card(
@@ -211,12 +215,12 @@ fun ThreatSuggestionItem(
         ) {
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = threat.callerName ?: threat.number,
+                    text = threat.headline,
                     style = MaterialTheme.typography.bodyLarge,
                     fontWeight = FontWeight.Bold
                 )
                 Text(
-                    text = threat.callerInfo ?: "High Risk Caller",
+                    text = threat.formattedInfo ?: "High Risk Caller",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.error
                 )

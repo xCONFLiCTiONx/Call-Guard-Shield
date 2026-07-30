@@ -32,6 +32,7 @@ class SettingsRepository(private val context: Context) {
         val GOOGLE_ACCOUNT_EMAIL = stringPreferencesKey("google_account_email")
         val WHITELIST_ENABLED = booleanPreferencesKey("whitelist_enabled")
         val BLACKLIST_ENABLED = booleanPreferencesKey("blacklist_enabled")
+        val DEBUG_ENABLED = booleanPreferencesKey("debug_enabled")
     }
 
     val settingsFlow: Flow<UserSettings> = context.dataStore.data.map { preferences ->
@@ -55,7 +56,8 @@ class SettingsRepository(private val context: Context) {
             aiBlockingAccuracy = preferences[PreferencesKeys.AI_BLOCKING_ACCURACY] ?: 90,
             googleAccountEmail = preferences[PreferencesKeys.GOOGLE_ACCOUNT_EMAIL],
             whitelistEnabled = preferences[PreferencesKeys.WHITELIST_ENABLED] ?: false,
-            blacklistEnabled = preferences[PreferencesKeys.BLACKLIST_ENABLED] ?: false
+            blacklistEnabled = preferences[PreferencesKeys.BLACKLIST_ENABLED] ?: false,
+            debugEnabled = preferences[PreferencesKeys.DEBUG_ENABLED] ?: false
         )
     }
 
@@ -135,6 +137,10 @@ class SettingsRepository(private val context: Context) {
         context.dataStore.edit { it[PreferencesKeys.BLACKLIST_ENABLED] = enabled }
     }
 
+    suspend fun updateDebugEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[PreferencesKeys.DEBUG_ENABLED] = enabled }
+    }
+
     suspend fun updateGoogleAccountEmail(email: String?) {
         context.dataStore.edit { 
             if (email == null) it.remove(PreferencesKeys.GOOGLE_ACCOUNT_EMAIL)
@@ -160,6 +166,7 @@ class SettingsRepository(private val context: Context) {
             it[PreferencesKeys.AI_BLOCKING_ACCURACY] = s.aiBlockingAccuracy
             it[PreferencesKeys.WHITELIST_ENABLED] = s.whitelistEnabled
             it[PreferencesKeys.BLACKLIST_ENABLED] = s.blacklistEnabled
+            it[PreferencesKeys.DEBUG_ENABLED] = s.debugEnabled
         }
     }
 }
@@ -184,5 +191,6 @@ data class UserSettings(
     val aiBlockingAccuracy: Int,
     val googleAccountEmail: String?,
     val whitelistEnabled: Boolean,
-    val blacklistEnabled: Boolean
+    val blacklistEnabled: Boolean,
+    val debugEnabled: Boolean
 )

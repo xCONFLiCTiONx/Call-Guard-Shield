@@ -38,7 +38,7 @@ class BulkIdentifyWorker(
                 Log.e("BULK_WORKER", "Aborting: Gemini API Key missing in Settings")
                 return Result.failure()
             }
-            val service = GeminiPhoneLookupService(applicationContext, apiKey, settings.selectedGeminiModel, dao)
+            val service = GeminiPhoneLookupService(apiKey, settings.selectedGeminiModel, dao)
             
             val listToIdentify = if (isBlacklist) dao.getBlacklistSync() else dao.getWhitelistSync()
             Log.i("BULK_WORKER", "Found ${listToIdentify.size} entries in $listType")
