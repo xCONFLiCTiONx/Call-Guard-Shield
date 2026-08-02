@@ -145,7 +145,7 @@ interface CallGuardShieldDao {
     @Query("SELECT * FROM call_log")
     suspend fun getAllCallLogsSync(): List<CallLogEntry>
 
-    @Query("SELECT number, COUNT(*) as count, MAX(timestamp) as lastTimestamp, GROUP_CONCAT(timestamp) as csvTimestamps FROM call_log GROUP BY number ORDER BY lastTimestamp DESC")
+    @Query("SELECT number, COUNT(*) as count, MAX(timestamp) as lastTimestamp, GROUP_CONCAT(timestamp) as csvTimestamps, (SELECT isBlocked FROM call_log WHERE number = main.number ORDER BY timestamp DESC LIMIT 1) as isBlocked FROM call_log as main GROUP BY number ORDER BY lastTimestamp DESC")
     fun getRawGroupedLogs(): Flow<List<RawGroupedLog>>
 
     @Query("DELETE FROM call_log WHERE id = :id")

@@ -4,7 +4,8 @@ data class RawGroupedLog(
     val number: String,
     val count: Int,
     val lastTimestamp: Long,
-    val csvTimestamps: String
+    val csvTimestamps: String,
+    val isBlocked: Boolean // Added to capture actual firewall decision
 )
 
 data class GroupedEnrichedCallLog(

@@ -116,7 +116,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 allTimestamps = stat?.csvTimestamps?.split(",")?.mapNotNull { it.toLongOrNull() } ?: emptyList(),
                 headline = headline,
                 formattedInfo = formattedInfo,
-                isBlocked = intel?.scam == true || intel?.spam == true || inBl,
+                isBlocked = stat?.isBlocked ?: (intel?.scam == true || intel?.spam == true || inBl),
                 isContact = false,
                 isInBlacklist = inBl,
                 isInWhitelist = inWl,

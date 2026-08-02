@@ -353,9 +353,17 @@ fun SettingsScreen(viewModel: MainViewModel) {
                     if (isGlobalEnabled) {
                         HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp), color = Color.Gray.copy(alpha = 0.2f))
                         val lastSync = settings.lastSyncTime
-                        val syncText = if (lastSync == 0L) "Never synced" else "Last sync: " + SimpleDateFormat("MMM dd, HH:mm", Locale.getDefault()).format(Date(lastSync))
+                        val dateFormat = SimpleDateFormat("MMM dd, HH:mm", Locale.getDefault())
+                        
+                        val lastSyncText = if (lastSync == 0L) "Never synced" else "Last sync: " + dateFormat.format(Date(lastSync))
+                        val nextSyncText = if (lastSync == 0L) "Next sync: Pending" 
+                                           else "Next sync: " + dateFormat.format(Date(lastSync + 30L * 24 * 60 * 60 * 1000))
+
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                            Text(syncText, style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+                            Column {
+                                Text(lastSyncText, style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+                                Text(nextSyncText, style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+                            }
                             Button(
                                 onClick = { viewModel.forceSync() },
                                 colors = ButtonDefaults.buttonColors(containerColor = ActionBlue, contentColor = Color.White)
