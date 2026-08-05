@@ -1,3 +1,11 @@
 <resources>
     <string name="app_name">Call Guard Shield</string>
+    <string name="contact_email">info@xconflictionx.cc</string>
+    <string name="company_website">https://xconflictionx.cc</string>
+    <string name="privacy_policy_url">https://xconflictionx.cc/privacy.html</string>
+    <string name="purchase_required_title">Purchase Required</string>
+    <string name="purchase_required_message">Please purchase the app from the Google Play Store to enable full firewall protection.</string>
+    <string name="nav_history">History</string>
+    <string name="nav_lists">Lists</string>
+    <string name="nav_settings">Settings</string>
 </resources>

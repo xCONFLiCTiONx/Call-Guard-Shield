@@ -23,11 +23,13 @@ import com.xconflictionx.callguardshield.ui.component.NumberActionMenu
 import com.xconflictionx.callguardshield.ui.component.NumberDetailsSheet
 import com.xconflictionx.callguardshield.ui.component.EditNumberDetailsDialog
 import com.xconflictionx.callguardshield.ui.component.NumberItemCard
+import com.xconflictionx.callguardshield.ui.component.UniversalSearchBar
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HistoryScreen(viewModel: MainViewModel) {
     val logs by viewModel.groupedCallLogs.collectAsState()
+    val searchQuery by viewModel.searchQuery.collectAsState()
     val selectedNumberIntel by viewModel.selectedNumberIntel.collectAsState()
     val foregroundNumber by viewModel.foregroundNumber.collectAsState()
     val context = LocalContext.current
@@ -42,22 +44,31 @@ fun HistoryScreen(viewModel: MainViewModel) {
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = { Text("Call History") },
-                actions = {
-                    if (logs.isNotEmpty()) {
-                        IconButton(onClick = { showClearDialog = true }) {
-                            Icon(Icons.Default.DeleteSweep, contentDescription = "Clear All")
+            Column {
+                TopAppBar(
+                    title = { Text("Call History") },
+                    actions = {
+                        if (logs.isNotEmpty() || searchQuery.isNotEmpty()) {
+                            IconButton(onClick = { showClearDialog = true }) {
+                                Icon(Icons.Default.DeleteSweep, contentDescription = "Clear All")
+                            }
                         }
                     }
-                }
-            )
+                )
+                UniversalSearchBar(
+                    query = searchQuery,
+                    onQueryChange = { viewModel.updateSearchQuery(it) }
+                )
+            }
         }
     ) { padding ->
         Box(modifier = Modifier.padding(padding)) {
             if (logs.isEmpty()) {
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text("No calls recorded yet.", color = Color.Gray)
+                    Text(
+                        text = if (searchQuery.isNotEmpty()) "No results found." else "No calls recorded yet.",
+                        color = Color.Gray
+                    )
                 }
             }
 
@@ -152,6 +163,7 @@ fun HistoryScreen(viewModel: MainViewModel) {
             // Show Settings Menu
             if (showSettings && selectedEntry != null) {
                 NumberActionMenu(
+                    viewModel = viewModel,
                     number = selectedEntry.number,
                     label = selectedEntry.headline,
                     intelResult = selectedNumberIntel,

@@ -8,7 +8,8 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
@@ -16,12 +17,17 @@ import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.compose.currentBackStackEntryAsState
+import com.xconflictionx.callguardshield.logic.LicenseManager
+import com.xconflictionx.callguardshield.logic.LicenseStatus
 import com.xconflictionx.callguardshield.ui.MainViewModel
 import com.xconflictionx.callguardshield.ui.screen.*
 import com.xconflictionx.callguardshield.ui.theme.CallGuardShieldTheme
@@ -36,19 +42,45 @@ class MainActivity : ComponentActivity() {
         setContent {
             val context = LocalContext.current
             val viewModel: MainViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
+            val settings by viewModel.settings.collectAsState()
             
-            CallGuardShieldTheme {
-                var showMainApp by remember { mutableStateOf(checkAllPermissions(context)) }
-                
-                if (!showMainApp) {
-                    PermissionScreen(
-                        onRequestRole = { requestCallScreeningRole() },
-                        onContinue = { 
-                            showMainApp = true
+            var licenseStatus by remember { mutableStateOf<LicenseStatus?>(null) }
+            
+            LaunchedEffect(Unit) {
+                val status = LicenseManager.checkLicense(context)
+                licenseStatus = status
+                if (status is LicenseStatus.Valid) {
+                    viewModel.setAppMode(status.mode)
+                }
+            }
+
+            CallGuardShieldTheme(
+                appTheme = settings.theme
+            ) {
+                when (val status = licenseStatus) {
+                    null -> {
+                        // Splash/Loading state
+                        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            CircularProgressIndicator()
                         }
-                    )
-                } else {
-                    MainApp(viewModel)
+                    }
+                    is LicenseStatus.Valid -> {
+                        var showMainApp by remember { mutableStateOf(checkAllPermissions(context)) }
+                        
+                        if (!showMainApp) {
+                            PermissionScreen(
+                                onRequestRole = { requestCallScreeningRole() },
+                                onContinue = { 
+                                    showMainApp = true
+                                }
+                            )
+                        } else {
+                            MainApp(viewModel)
+                        }
+                    }
+                    is LicenseStatus.Invalid -> {
+                        PurchaseRequiredScreen(status.message)
+                    }
                 }
             }
         }
@@ -81,7 +113,11 @@ fun MainApp(viewModel: MainViewModel) {
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route ?: "history"
     
-    val items = listOf("History", "Lists", "Settings")
+    val items = listOf(
+        stringResource(R.string.nav_history),
+        stringResource(R.string.nav_lists),
+        stringResource(R.string.nav_settings)
+    )
     val routes = listOf("history", "lists", "settings")
     val icons = listOf(
         Icons.Default.History, 
@@ -136,7 +172,15 @@ fun MainApp(viewModel: MainViewModel) {
         ) {
             composable("history") { HistoryScreen(viewModel) }
             composable("lists") { ListManagementScreen(viewModel) }
-            composable("settings") { SettingsScreen(viewModel) }
+            composable("settings") { 
+                SettingsScreen(
+                    viewModel = viewModel,
+                    onNavigateToPrivacy = { navController.navigate("privacy_policy") }
+                ) 
+            }
+            composable("privacy_policy") {
+                PrivacyPolicyScreen(onNavigateBack = { navController.popBackStack() })
+            }
         }
     }
 }

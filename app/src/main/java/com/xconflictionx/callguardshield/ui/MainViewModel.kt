@@ -63,14 +63,37 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             googleAccountEmail = null,
             whitelistEnabled = false,
             blacklistEnabled = false,
-            debugEnabled = false
+            debugEnabled = false,
+            theme = AppTheme.SYSTEM
         )
     )
 
+    private val _appMode = MutableStateFlow(AppMode.EVALUATION)
+    val appMode = _appMode.asStateFlow()
+
+    fun setAppMode(mode: AppMode) {
+        _appMode.value = mode
+    }
+
+    val callLogs = dao.getAllCallLogs().stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
     val blacklist = dao.getBlacklist().stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
     val whitelist = dao.getWhitelist().stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+    
     private val lookupCache = dao.getAllLookupResultsFlow()
     private val rawGroupedLogs = dao.getRawGroupedLogs()
+    private val globalSpamEntries = dao.getAllGlobalSpamEntries().stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    private val _searchQuery = MutableStateFlow("")
+    val searchQuery = _searchQuery.asStateFlow()
+
+    @OptIn(FlowPreview::class)
+    private val debouncedSearchQuery = _searchQuery
+        .debounce(1000.milliseconds)
+        .stateIn(viewModelScope, SharingStarted.Eagerly, "")
+
+    fun updateSearchQuery(query: String) {
+        _searchQuery.value = query
+    }
 
     // Unified helper for enriching any list of numbers with intel and call stats
     private fun enrichList(
@@ -79,13 +102,23 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         stats: List<RawGroupedLog>,
         bl: List<BlacklistEntry>,
         wl: List<WhitelistEntry>,
-        cache: List<PhoneLookupResult>
+        cache: List<PhoneLookupResult>,
+        globalSpam: List<GlobalSpamEntry>,
+        query: String
     ): List<GroupedEnrichedCallLog> {
-        return numbers.map { num ->
+        val cleanQuery = query.lowercase().trim()
+        
+        return numbers.mapNotNull { num ->
             val intel = cache.find { it.phoneNumber == num }
             val stat = stats.find { it.number == num }
-            val inBl = bl.any { num.startsWith(it.pattern.removeSuffix("%")) }
-            val inWl = wl.any { it.number == num }
+            val matchBl = bl.find { PhoneHelper.isMatch(num, it.pattern) }
+            val inBl = matchBl != null
+            val inWl = wl.any { PhoneHelper.isExactMatch(num, it.number) }
+            val inGs = globalSpam.any { PhoneHelper.isMatch(num, it.pattern) }
+            
+            val isExactBl = matchBl != null && PhoneHelper.isExactMatch(num, matchBl.pattern)
+            val isPrefixBl = matchBl != null && !isExactBl
+            
             val rawLabel = labels[num]
             
             val headline = intel?.manualLabel 
@@ -99,6 +132,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     intel?.telemarketer == true -> "Telemarketer"
                     else -> num
                 }
+
+            // Apply search filtering
+            if (cleanQuery.isNotEmpty()) {
+                val matchHeadline = headline.lowercase().contains(cleanQuery)
+                val matchNumber = num.lowercase().contains(cleanQuery)
+                val matchOwner = intel?.ownerName?.lowercase()?.contains(cleanQuery) ?: false
+                val matchCompany = intel?.companyName?.lowercase()?.contains(cleanQuery) ?: false
+                val matchManual = intel?.manualLabel?.lowercase()?.contains(cleanQuery) ?: false
+                
+                if (!matchHeadline && !matchNumber && !matchOwner && !matchCompany && !matchManual) {
+                    return@mapNotNull null
+                }
+            }
 
             val formattedInfo = intel?.let { res ->
                 buildString {
@@ -116,21 +162,35 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 allTimestamps = stat?.csvTimestamps?.split(",")?.mapNotNull { it.toLongOrNull() } ?: emptyList(),
                 headline = headline,
                 formattedInfo = formattedInfo,
-                isBlocked = stat?.isBlocked ?: (intel?.scam == true || intel?.spam == true || inBl),
+                isBlocked = stat?.isBlocked ?: (intel?.scam == true || intel?.spam == true || inBl || inGs),
                 isContact = false,
-                isInBlacklist = inBl,
+                isInBlacklist = isExactBl,
+                isPrefixMatch = isPrefixBl,
+                isGlobalSpamMatch = inGs,
                 isInWhitelist = inWl,
                 intel = intel
             )
         }
     }
 
-    val blacklistFull = combine(blacklist, rawGroupedLogs, whitelist, lookupCache) { bl, stats, wl, cache ->
-        enrichList(bl.map { it.pattern }, bl.associate { it.pattern to it.label }, stats, bl, wl, cache)
+    val blacklistFull = combine(blacklist, rawGroupedLogs, whitelist, lookupCache, globalSpamEntries, debouncedSearchQuery) { args: Array<Any> ->
+        val bl = args[0] as List<BlacklistEntry>
+        val stats = args[1] as List<RawGroupedLog>
+        val wl = args[2] as List<WhitelistEntry>
+        val cache = args[3] as List<PhoneLookupResult>
+        val gs = args[4] as List<GlobalSpamEntry>
+        val query = args[5] as String
+        enrichList(bl.map { it.pattern }, bl.associate { it.pattern to it.label }, stats, bl, wl, cache, gs, query)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    val whitelistFull = combine(whitelist, rawGroupedLogs, blacklist, lookupCache) { wl, stats, bl, cache ->
-        enrichList(wl.map { it.number }, wl.associate { it.number to it.label }, stats, bl, wl, cache)
+    val whitelistFull = combine(whitelist, rawGroupedLogs, blacklist, lookupCache, globalSpamEntries, debouncedSearchQuery) { args: Array<Any> ->
+        val wl = args[0] as List<WhitelistEntry>
+        val stats = args[1] as List<RawGroupedLog>
+        val bl = args[2] as List<BlacklistEntry>
+        val cache = args[3] as List<PhoneLookupResult>
+        val gs = args[4] as List<GlobalSpamEntry>
+        val query = args[5] as String
+        enrichList(wl.map { it.number }, wl.associate { it.number to it.label }, stats, bl, wl, cache, gs, query)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     // Enriched & Grouped Call Logs
@@ -138,9 +198,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         dao.getRawGroupedLogs(),
         blacklist,
         whitelist,
-        lookupCache
-    ) { rawLogs, bl, wl, cache ->
-        enrichList(rawLogs.map { it.number }, emptyMap(), rawLogs, bl, wl, cache)
+        lookupCache,
+        globalSpamEntries,
+        debouncedSearchQuery
+    ) { args: Array<Any> ->
+        val rawLogs = args[0] as List<RawGroupedLog>
+        val bl = args[1] as List<BlacklistEntry>
+        val wl = args[2] as List<WhitelistEntry>
+        val cache = args[3] as List<PhoneLookupResult>
+        val gs = args[4] as List<GlobalSpamEntry>
+        val query = args[5] as String
+        enrichList(rawLogs.map { it.number }, emptyMap(), rawLogs, bl, wl, cache, gs, query)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val globalSpamCount = dao.getGlobalSpamCount().stateIn(viewModelScope, SharingStarted.Eagerly, 0)
@@ -503,6 +571,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun updateSelectedModel(m: String) { viewModelScope.launch { settingsRepo.updateSelectedGeminiModel(m) } }
     fun updateAutoMaintenance(e: Boolean) { viewModelScope.launch { settingsRepo.updateAutoMaintenanceEnabled(e) } }
     fun updateDebugEnabled(e: Boolean) { viewModelScope.launch { settingsRepo.updateDebugEnabled(e) } }
+    fun updateTheme(theme: AppTheme) { viewModelScope.launch { settingsRepo.updateTheme(theme) } }
+    
     fun saveGeminiKey(k: String) { 
         val trimmed = k.trim()
         viewModelScope.launch { 
@@ -592,13 +662,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun importNumbers(uri: Uri, toBlacklist: Boolean, onComplete: () -> Unit) {
+    fun importNumbers(uri: Uri, onComplete: () -> Unit) {
         viewModelScope.launch {
             try {
                 getApplication<Application>().contentResolver.openInputStream(uri)?.use { stream ->
                     val text = Scanner(stream).useDelimiter("\\A").next()
                     if (text.trim().startsWith("{") && text.contains("lookupCache")) handleFullBackupRestore(text)
-                    else handleBulkProcessing(text, toBlacklist)
+                    else handleBulkProcessing(text, true)
                 }
             } catch (e: Exception) { }
             onComplete()

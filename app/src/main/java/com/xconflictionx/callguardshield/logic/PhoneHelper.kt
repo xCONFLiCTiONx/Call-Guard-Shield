@@ -59,4 +59,33 @@ object PhoneHelper {
             else -> null
         }
     }
+
+    /**
+     * Checks if a number matches a pattern (prefix or full match).
+     * Strips all formatting and +1 prefix before comparing.
+     */
+    fun isMatch(number: String, pattern: String): Boolean {
+        val n = cleanForComparison(number)
+        val p = cleanForComparison(pattern).removeSuffix("%")
+        if (n.isEmpty() || p.isEmpty()) return false
+        return n.startsWith(p)
+    }
+
+    /**
+     * Checks if a number is an exact match for a pattern.
+     */
+    fun isExactMatch(number: String, pattern: String): Boolean {
+        val n = cleanForComparison(number)
+        val p = cleanForComparison(pattern).removeSuffix("%")
+        return n == p
+    }
+
+    private fun cleanForComparison(input: String): String {
+        val digits = input.filter { it.isDigit() }
+        return if (digits.startsWith("1") && digits.length > 10) {
+            digits.substring(1)
+        } else {
+            digits
+        }
+    }
 }

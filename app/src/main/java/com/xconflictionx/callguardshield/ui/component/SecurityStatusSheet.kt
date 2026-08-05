@@ -26,6 +26,7 @@ fun SecurityStatusSheet(
     val settings by viewModel.settings.collectAsState()
     val apiKeyStatus by viewModel.apiKeyStatus.collectAsState()
     val suggestions by viewModel.securitySuggestions.collectAsState()
+    val appMode by viewModel.appMode.collectAsState()
     
     val dateFormatter = SimpleDateFormat("MMM dd, HH:mm", Locale.getDefault())
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -45,17 +46,26 @@ fun SecurityStatusSheet(
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             item {
-                Text(
-                    "Security Outlook",
-                    style = MaterialTheme.typography.headlineSmall,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.primary
-                )
-                Text(
-                    "Overview of your current firewall posture.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = Color.Gray
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.Top
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            "Security Outlook",
+                            style = MaterialTheme.typography.headlineSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Text(
+                            "Overview of your current firewall posture.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color.Gray
+                        )
+                    }
+                    AppModeBadge(appMode)
+                }
             }
 
             // 0. System Intelligence

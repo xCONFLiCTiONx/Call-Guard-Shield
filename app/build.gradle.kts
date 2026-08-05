@@ -15,6 +15,8 @@ android {
         targetSdk = 35
         versionCode = 1
         versionName = "1.0"
+        
+        buildConfigField("boolean", "BYPASS_LICENSE_CHECK", "true")
     }
 
     buildTypes {
@@ -26,6 +28,7 @@ android {
                 "proguard-rules.pro"
             )
             signingConfig = signingConfigs.getByName("debug")
+            buildConfigField("boolean", "BYPASS_LICENSE_CHECK", "false")
         }
     }
     lint {
@@ -38,6 +41,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
     packaging {
         resources {
@@ -113,4 +117,5 @@ dependencies {
 
     // Security
     implementation(libs.androidx.security.crypto)
+    implementation("com.google.android.play:integrity:1.4.0")
 }

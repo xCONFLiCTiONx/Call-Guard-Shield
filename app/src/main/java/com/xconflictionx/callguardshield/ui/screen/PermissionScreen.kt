@@ -34,7 +34,7 @@ fun PermissionScreen(
     onRequestRole: () -> Unit,
     onContinue: () -> Unit
 ) {
-    CallGuardShieldTheme(darkTheme = true, dynamicColor = false) {
+    CallGuardShieldTheme {
         val context = LocalContext.current
         val lifecycleOwner = LocalLifecycleOwner.current
         val scrollState = rememberScrollState()

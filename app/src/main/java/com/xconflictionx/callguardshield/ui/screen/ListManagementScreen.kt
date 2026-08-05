@@ -25,6 +25,7 @@ import com.xconflictionx.callguardshield.ui.component.NumberActionMenu
 import com.xconflictionx.callguardshield.ui.component.NumberDetailsSheet
 import com.xconflictionx.callguardshield.ui.component.EditNumberDetailsDialog
 import com.xconflictionx.callguardshield.ui.component.NumberItemCard
+import com.xconflictionx.callguardshield.ui.component.UniversalSearchBar
 import com.xconflictionx.callguardshield.data.entity.BlacklistEntry
 import com.xconflictionx.callguardshield.data.entity.WhitelistEntry
 
@@ -35,6 +36,8 @@ fun ListManagementScreen(viewModel: MainViewModel) {
     val bulkNumber by viewModel.bulkNumber.collectAsState()
     val foregroundNumber by viewModel.foregroundNumber.collectAsState()
     val selectedNumberIntel by viewModel.selectedNumberIntel.collectAsState()
+    val searchQuery by viewModel.searchQuery.collectAsState()
+    
     var tabIndex by remember { mutableIntStateOf(0) }
     val tabs = listOf("Blacklist", "Whitelist")
     val icons = listOf(Icons.Default.Block, Icons.Default.VerifiedUser)
@@ -64,6 +67,11 @@ fun ListManagementScreen(viewModel: MainViewModel) {
                 )
             }
         }
+
+        UniversalSearchBar(
+            query = searchQuery,
+            onQueryChange = { viewModel.updateSearchQuery(it) }
+        )
 
         if (isIdentifying) {
             Column(modifier = Modifier.fillMaxWidth()) {
@@ -145,7 +153,7 @@ fun ListManagementScreen(viewModel: MainViewModel) {
             text = { Text("Would you like to import this as a combined backup, or add to a specific list?") },
             confirmButton = {
                 Button(onClick = {
-                    viewModel.importNumbers(pendingFileUri!!, true) { }
+                    viewModel.importNumbers(pendingFileUri!!) { }
                     showImportDialog = false
                 }) { Text("Auto-Detect / Backup") }
             },
@@ -166,9 +174,9 @@ fun ListManagementScreen(viewModel: MainViewModel) {
         }
 
         if (tabIndex == 0) {
-            BlacklistTab(viewModel, selectedNumberIntel, foregroundNumber)
+            BlacklistTab(viewModel, selectedNumberIntel, foregroundNumber, searchQuery)
         } else {
-            WhitelistTab(viewModel, selectedNumberIntel, foregroundNumber)
+            WhitelistTab(viewModel, selectedNumberIntel, foregroundNumber, searchQuery)
         }
     }
 }
@@ -238,7 +246,7 @@ fun PasteNumbersDialog(onDismiss: () -> Unit, onConfirm: (String, Boolean) -> Un
             Button(onClick = { onConfirm(text, toBlacklist) }) { Text("Import") }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel") }
+            TextButton(onClick = { onDismiss() }) { Text("Cancel") }
         }
     )
 }
@@ -247,7 +255,8 @@ fun PasteNumbersDialog(onDismiss: () -> Unit, onConfirm: (String, Boolean) -> Un
 fun BlacklistTab(
     viewModel: MainViewModel, 
     selectedNumberIntel: com.xconflictionx.callguardshield.data.entity.PhoneLookupResult? = null,
-    foregroundNumber: String? = null
+    foregroundNumber: String? = null,
+    searchQuery: String = ""
 ) {
     val blacklistFull by viewModel.blacklistFull.collectAsState()
     var selectedIndex by remember { mutableIntStateOf(-1) }
@@ -262,7 +271,10 @@ fun BlacklistTab(
         Box(modifier = Modifier.padding(padding)) {
             if (blacklistFull.isEmpty()) {
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text("Blacklist is empty.", color = Color.Gray)
+                    Text(
+                        text = if (searchQuery.isNotEmpty()) "No results found." else "Blacklist is empty.",
+                        color = Color.Gray
+                    )
                 }
             }
 
@@ -332,6 +344,7 @@ fun BlacklistTab(
             // Show Settings Menu
             if (showSettings && selectedEntry != null) {
                 NumberActionMenu(
+                    viewModel = viewModel,
                     number = selectedEntry.number,
                     label = selectedEntry.headline,
                     intelResult = selectedNumberIntel,
@@ -382,7 +395,8 @@ fun BlacklistTab(
 fun WhitelistTab(
     viewModel: MainViewModel, 
     selectedNumberIntel: com.xconflictionx.callguardshield.data.entity.PhoneLookupResult? = null,
-    foregroundNumber: String? = null
+    foregroundNumber: String? = null,
+    searchQuery: String = ""
 ) {
     val whitelistFull by viewModel.whitelistFull.collectAsState()
     var selectedIndex by remember { mutableIntStateOf(-1) }
@@ -397,7 +411,10 @@ fun WhitelistTab(
         Box(modifier = Modifier.padding(padding)) {
             if (whitelistFull.isEmpty()) {
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text("Whitelist is empty.", color = Color.Gray)
+                    Text(
+                        text = if (searchQuery.isNotEmpty()) "No results found." else "Whitelist is empty.",
+                        color = Color.Gray
+                    )
                 }
             }
 
@@ -467,6 +484,7 @@ fun WhitelistTab(
             // Show Settings Menu
             if (showSettings && selectedEntry != null) {
                 NumberActionMenu(
+                    viewModel = viewModel,
                     number = selectedEntry.number,
                     label = selectedEntry.headline,
                     intelResult = selectedNumberIntel,
@@ -517,7 +535,7 @@ fun WhitelistTab(
 fun EditLabelDialog(initialLabel: String, onDismiss: () -> Unit, onConfirm: (String) -> Unit) {
     var text by remember { mutableStateOf(initialLabel) }
     AlertDialog(
-        onDismissRequest = onDismiss,
+        onDismissRequest = { onDismiss() },
         title = { Text("Edit Label") },
         text = {
             OutlinedTextField(
@@ -531,7 +549,7 @@ fun EditLabelDialog(initialLabel: String, onDismiss: () -> Unit, onConfirm: (Str
             Button(onClick = { onConfirm(text) }) { Text("Save") }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel") }
+            TextButton(onClick = { onDismiss() }) { Text("Cancel") }
         }
     )
 }

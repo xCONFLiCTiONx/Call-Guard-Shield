@@ -8,6 +8,7 @@ import androidx.compose.ui.text.AnnotatedString
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -19,6 +20,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
@@ -32,9 +34,13 @@ import com.google.android.gms.auth.api.signin.GoogleSignIn
 import com.google.android.gms.auth.api.signin.GoogleSignInOptions
 import com.google.android.gms.common.api.ApiException
 import com.google.android.gms.common.api.Scope
+import com.xconflictionx.callguardshield.data.repository.AppTheme
+import com.xconflictionx.callguardshield.logic.AppMode
 import com.xconflictionx.callguardshield.logic.CryptoManager
 import com.xconflictionx.callguardshield.ui.LogLevel
 import com.xconflictionx.callguardshield.ui.MainViewModel
+import com.xconflictionx.callguardshield.ui.component.AppModeBadge
+import com.xconflictionx.callguardshield.ui.component.ProBadge
 import java.text.SimpleDateFormat
 import java.util.*
 import kotlin.math.roundToInt
@@ -42,13 +48,19 @@ import kotlin.math.roundToInt
 private val ActionBlue = Color(0xFF1565C0)
 
 @Composable
-fun SettingsScreen(viewModel: MainViewModel) {
+fun SettingsScreen(
+    viewModel: MainViewModel,
+    onNavigateToPrivacy: () -> Unit
+) {
     val settings by viewModel.settings.collectAsState()
     val apiKeyStatus by viewModel.apiKeyStatus.collectAsState()
     val availableModels by viewModel.availableModels.collectAsState()
     val driveError by viewModel.driveError.collectAsState()
+    val appMode by viewModel.appMode.collectAsState()
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
+    
+    val isPro = appMode == AppMode.PRO || appMode == AppMode.DEBUG
     
     var showLocationRationale by remember { mutableStateOf(false) }
     var showSecurityStatus by remember { mutableStateOf(false) }
@@ -83,7 +95,7 @@ fun SettingsScreen(viewModel: MainViewModel) {
         ActivityResultContracts.GetContent()
     ) { uri ->
         uri?.let {
-            viewModel.importNumbers(it, true) {
+            viewModel.importNumbers(it) {
                 Toast.makeText(context, "Restore complete!", Toast.LENGTH_SHORT).show()
             }
         }
@@ -184,93 +196,145 @@ fun SettingsScreen(viewModel: MainViewModel) {
             }
         }
 
-        // --- GOOGLE SYNC (NOW AT TOP) ---
+        // --- GOOGLE SYNC ---
         item {
             val isDriveConnected by viewModel.isGoogleDriveConnected.collectAsState()
             val isBackupActive by viewModel.isBackupActive.collectAsState()
             
-            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Text("☁️ Sync to Google Account", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            Card(
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = if (isPro) 0.5f else 0.2f)),
+                onClick = { if (!isPro) Toast.makeText(context, "Pro Feature", Toast.LENGTH_SHORT).show() }
+            ) {
+                Column(modifier = Modifier.padding(16.dp).alpha(if (isPro) 1f else 0.5f)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("☁️ Sync to Google Account", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                        if (!isPro) {
+                            Spacer(modifier = Modifier.width(8.dp))
+                            ProBadge()
+                        }
+                    }
                     Text("Securely backup your settings and history to your personal cloud storage.", style = MaterialTheme.typography.bodySmall)
                     Spacer(modifier = Modifier.height(12.dp))
 
-                    if (driveError == "API_DISABLED") {
-                        Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer), modifier = Modifier.padding(bottom = 12.dp)) {
-                            Column(modifier = Modifier.padding(12.dp)) {
-                                Text("ACTION REQUIRED", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.error)
-                                Text("Google Drive API is disabled in your cloud project. This is why sync is failing.", style = MaterialTheme.typography.bodySmall)
-                                Button(
-                                    onClick = { 
-                                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://console.developers.google.com/apis/api/drive.googleapis.com/overview?project=38581640934"))
-                                        context.startActivity(intent)
-                                    },
-                                    modifier = Modifier.padding(top = 8.dp).fillMaxWidth(),
-                                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
-                                ) {
-                                    Text("Enable Drive API Now")
+                    if (isPro) {
+                        if (driveError == "API_DISABLED") {
+                            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer), modifier = Modifier.padding(bottom = 12.dp)) {
+                                Column(modifier = Modifier.padding(12.dp)) {
+                                    Text("ACTION REQUIRED", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.error)
+                                    Text("Google Drive API is disabled in your cloud project. This is why sync is failing.", style = MaterialTheme.typography.bodySmall)
+                                    Button(
+                                        onClick = { 
+                                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://console.developers.google.com/apis/api/drive.googleapis.com/overview?project=38581640934"))
+                                            context.startActivity(intent)
+                                        },
+                                        modifier = Modifier.padding(top = 8.dp).fillMaxWidth(),
+                                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                                    ) {
+                                        Text("Enable Drive API Now")
+                                    }
                                 }
+                            }
+                        }
+                        
+                        if (isDriveConnected) {
+                            Column(modifier = Modifier.fillMaxWidth()) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Default.CloudDone, contentDescription = null, tint = Color.Green, modifier = Modifier.size(24.dp))
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(text = "Connected", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold, color = Color.Green)
+                                        Text(text = settings.googleAccountEmail ?: "Active Account", style = MaterialTheme.typography.bodySmall, color = Color.LightGray)
+                                    }
+                                    TextButton(
+                                        onClick = { 
+                                            val gso = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN).build()
+                                            val client = GoogleSignIn.getClient(context, gso)
+                                            client.signOut().addOnCompleteListener { viewModel.disconnectGoogleDrive() }
+                                        }
+                                    ) {
+                                        Text("Sign Out", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelMedium)
+                                    }
+                                }
+                            }
+                            Row(modifier = Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Button(
+                                    onClick = { viewModel.triggerAutoBackup() }, 
+                                    modifier = Modifier.weight(1f), 
+                                    colors = ButtonDefaults.buttonColors(containerColor = ActionBlue, contentColor = Color.White)
+                                ) {
+                                    Icon(Icons.Default.CloudQueue, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text("Sync Now", style = MaterialTheme.typography.labelSmall)
+                                }
+                                Button(
+                                    onClick = { viewModel.triggerCloudRestore() }, 
+                                    modifier = Modifier.weight(1f),
+                                    colors = ButtonDefaults.buttonColors(containerColor = ActionBlue, contentColor = Color.White)
+                                ) {
+                                    Icon(Icons.Default.CloudDownload, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text("Restore", style = MaterialTheme.typography.labelSmall)
+                                }
+                            }
+                            if (isBackupActive) LinearProgressIndicator(modifier = Modifier.fillMaxWidth().height(2.dp).padding(top = 4.dp), color = Color.Green, trackColor = Color.Transparent)
+                        } else {
+                            Button(
+                                onClick = { 
+                                    isConnectingGoogle = true
+                                    val gso = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN).requestEmail().requestScopes(Scope("https://www.googleapis.com/auth/drive.file")).build()
+                                    val client = GoogleSignIn.getClient(context, gso)
+                                    client.signOut().addOnCompleteListener { googleSignInLauncher.launch(client.signInIntent) }
+                                },
+                                modifier = Modifier.fillMaxWidth(),
+                                enabled = !isConnectingGoogle,
+                                colors = ButtonDefaults.buttonColors(containerColor = ActionBlue, contentColor = Color.White)
+                            ) {
+                                if (isConnectingGoogle) {
+                                    CircularProgressIndicator(modifier = Modifier.size(16.dp), color = Color.White, strokeWidth = 2.dp)
+                                    Spacer(modifier = Modifier.width(8.dp)); Text("Connecting...")
+                                } else Text("Sign in with Google")
                             }
                         }
                     }
+                }
+            }
+        }
+
+        // --- THEME SELECTOR ---
+        item {
+            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text("App Theme", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                     
-                    if (isDriveConnected) {
-                        Column(modifier = Modifier.fillMaxWidth()) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(Icons.Default.CloudDone, contentDescription = null, tint = Color.Green, modifier = Modifier.size(24.dp))
-                                Spacer(modifier = Modifier.width(12.dp))
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(text = "Connected", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold, color = Color.Green)
-                                    Text(text = settings.googleAccountEmail ?: "Active Account", style = MaterialTheme.typography.bodySmall, color = Color.LightGray)
-                                }
-                                TextButton(
-                                    onClick = { 
-                                        val gso = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN).build()
-                                        val client = GoogleSignIn.getClient(context, gso)
-                                        client.signOut().addOnCompleteListener { viewModel.disconnectGoogleDrive() }
-                                    }
-                                ) {
-                                    Text("Sign Out", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelMedium)
-                                }
-                            }
-                        }
-                        Row(modifier = Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Button(
-                                onClick = { viewModel.triggerAutoBackup() }, 
-                                modifier = Modifier.weight(1f), 
-                                colors = ButtonDefaults.buttonColors(containerColor = ActionBlue, contentColor = Color.White)
-                            ) {
-                                Icon(Icons.Default.CloudQueue, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text("Sync Now", style = MaterialTheme.typography.labelSmall)
-                            }
-                            Button(
-                                onClick = { viewModel.triggerCloudRestore() }, 
-                                modifier = Modifier.weight(1f),
-                                colors = ButtonDefaults.buttonColors(containerColor = ActionBlue, contentColor = Color.White)
-                            ) {
-                                Icon(Icons.Default.CloudDownload, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text("Restore", style = MaterialTheme.typography.labelSmall)
-                            }
-                        }
-                        if (isBackupActive) LinearProgressIndicator(modifier = Modifier.fillMaxWidth().height(2.dp).padding(top = 4.dp), color = Color.Green, trackColor = Color.Transparent)
-                    } else {
-                        Button(
-                            onClick = { 
-                                isConnectingGoogle = true
-                                val gso = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN).requestEmail().requestScopes(Scope("https://www.googleapis.com/auth/drive.file")).build()
-                                val client = GoogleSignIn.getClient(context, gso)
-                                client.signOut().addOnCompleteListener { googleSignInLauncher.launch(client.signInIntent) }
-                            },
+                    var expanded by remember { mutableStateOf(false) }
+                    val currentTheme = settings.theme
+
+                    Box(modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
+                        OutlinedTextField(
+                            value = currentTheme.name.lowercase().replaceFirstChar { it.uppercase() },
+                            onValueChange = { },
+                            readOnly = true,
                             modifier = Modifier.fillMaxWidth(),
-                            enabled = !isConnectingGoogle,
-                            colors = ButtonDefaults.buttonColors(containerColor = ActionBlue, contentColor = Color.White)
+                            trailingIcon = {
+                                IconButton(onClick = { expanded = true }) {
+                                    Icon(Icons.Default.ArrowDropDown, contentDescription = null)
+                                }
+                            }
+                        )
+                        DropdownMenu(
+                            expanded = expanded,
+                            onDismissRequest = { expanded = false },
+                            modifier = Modifier.fillMaxWidth(0.8f)
                         ) {
-                            if (isConnectingGoogle) {
-                                CircularProgressIndicator(modifier = Modifier.size(16.dp), color = Color.White, strokeWidth = 2.dp)
-                                Spacer(modifier = Modifier.width(8.dp)); Text("Connecting...")
-                            } else Text("Sign in with Google")
+                            AppTheme.entries.forEach { theme ->
+                                DropdownMenuItem(
+                                    text = { Text(theme.name.lowercase().replaceFirstChar { it.uppercase() }) },
+                                    onClick = {
+                                        viewModel.updateTheme(theme)
+                                        expanded = false
+                                    }
+                                )
+                            }
                         }
                     }
                 }
@@ -435,40 +499,52 @@ fun SettingsScreen(viewModel: MainViewModel) {
 
         item {
             var tempKey by remember(apiKeyStatus) { mutableStateOf(CryptoManager.getGeminiApiKey(context) ?: "") }
-            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Text("Gemini API Key", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                    Text("Required for caller investigation and identification.", style = MaterialTheme.typography.bodySmall)
-                    OutlinedTextField(value = tempKey, onValueChange = { tempKey = it }, label = { Text("API Key") }, modifier = Modifier.fillMaxWidth().padding(top = 8.dp), visualTransformation = PasswordVisualTransformation(), singleLine = true)
-                    Row(modifier = Modifier.fillMaxWidth().padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(
-                            onClick = { viewModel.saveGeminiKey(tempKey.trim()) }, 
-                            modifier = Modifier.weight(1f),
-                            colors = ButtonDefaults.buttonColors(containerColor = ActionBlue, contentColor = Color.White)
-                        ) { 
-                            Text("Save") 
-                        }
-                        Button(
-                            onClick = { viewModel.testGeminiKey() }, 
-                            modifier = Modifier.weight(1f),
-                            colors = ButtonDefaults.buttonColors(containerColor = ActionBlue, contentColor = Color.White)
-                        ) { 
-                            Text("Test Key") 
-                        }
-                    }
-                    if (apiKeyStatus == "Connected") {
-                        TextButton(onClick = { viewModel.clearGeminiKey() }, modifier = Modifier.align(Alignment.CenterHorizontally)) { Text("Clear Saved Key", color = MaterialTheme.colorScheme.error) }
-                    }
-                    HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp), color = Color.Gray.copy(alpha = 0.1f))
+            Card(
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = if (isPro) 0.5f else 0.2f)),
+                onClick = { if (!isPro) Toast.makeText(context, "Pro Feature", Toast.LENGTH_SHORT).show() }
+            ) {
+                Column(modifier = Modifier.padding(16.dp).alpha(if (isPro) 1f else 0.5f)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("Status: ", style = MaterialTheme.typography.bodySmall)
-                        Text(apiKeyStatus, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold, color = if (apiKeyStatus == "Connected") Color.Green else if (apiKeyStatus == "Testing...") Color.Yellow else if (apiKeyStatus == "Missing API Key") Color.Gray else Color.Red)
+                        Text("Gemini API Key", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                        if (!isPro) {
+                            Spacer(modifier = Modifier.width(8.dp))
+                            ProBadge()
+                        }
+                    }
+                    Text("Required for caller investigation and identification.", style = MaterialTheme.typography.bodySmall)
+                    
+                    if (isPro) {
+                        OutlinedTextField(value = tempKey, onValueChange = { tempKey = it }, label = { Text("API Key") }, modifier = Modifier.fillMaxWidth().padding(top = 8.dp), visualTransformation = PasswordVisualTransformation(), singleLine = true)
+                        Row(modifier = Modifier.fillMaxWidth().padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Button(
+                                onClick = { viewModel.saveGeminiKey(tempKey.trim()) }, 
+                                modifier = Modifier.weight(1f),
+                                colors = ButtonDefaults.buttonColors(containerColor = ActionBlue, contentColor = Color.White)
+                            ) { 
+                                Text("Save") 
+                            }
+                            Button(
+                                onClick = { viewModel.testGeminiKey() }, 
+                                modifier = Modifier.weight(1f),
+                                colors = ButtonDefaults.buttonColors(containerColor = ActionBlue, contentColor = Color.White)
+                            ) { 
+                                Text("Test Key") 
+                            }
+                        }
+                        if (apiKeyStatus == "Connected") {
+                            TextButton(onClick = { viewModel.clearGeminiKey() }, modifier = Modifier.align(Alignment.CenterHorizontally)) { Text("Clear Saved Key", color = MaterialTheme.colorScheme.error) }
+                        }
+                        HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp), color = Color.Gray.copy(alpha = 0.1f))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("Status: ", style = MaterialTheme.typography.bodySmall)
+                            Text(apiKeyStatus, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold, color = if (apiKeyStatus == "Connected") Color.Green else if (apiKeyStatus == "Testing...") Color.Yellow else if (apiKeyStatus == "Missing API Key") Color.Gray else Color.Red)
+                        }
                     }
                 }
             }
         }
 
-        if (apiKeyStatus == "Connected") {
+        if (isPro && apiKeyStatus == "Connected") {
             item {
                 Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))) {
                     Column(modifier = Modifier.padding(16.dp)) {
@@ -571,46 +647,64 @@ fun SettingsScreen(viewModel: MainViewModel) {
         item {
             val consoleLogs by viewModel.consoleLogs.collectAsState()
             val clipboard = LocalClipboardManager.current
-            Card(colors = CardDefaults.cardColors(containerColor = Color.Black), modifier = Modifier.fillMaxWidth()) {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = Color.Black), 
+                modifier = Modifier.fillMaxWidth().alpha(if (isPro) 1f else 0.5f),
+                onClick = { if (!isPro) Toast.makeText(context, "Pro Feature", Toast.LENGTH_SHORT).show() }
+            ) {
                 Column(modifier = Modifier.padding(12.dp)) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text("Backend Activity", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text("Debug", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
-                            Switch(
-                                checked = settings.debugEnabled,
-                                onCheckedChange = { viewModel.updateDebugEnabled(it) },
-                                modifier = Modifier.scale(0.6f).padding(horizontal = 4.dp)
-                            )
-                            TextButton(onClick = { 
-                                val text = consoleLogs.joinToString("\n") { "[${it.formattedTime}] ${it.tag}: ${it.message}" }
-                                if (text.isNotBlank()) { clipboard.setText(AnnotatedString(text)); Toast.makeText(context, "Logs copied", Toast.LENGTH_SHORT).show() }
-                            }) { Text("Copy All", style = MaterialTheme.typography.labelSmall) }
-                            TextButton(onClick = { viewModel.clearConsole() }) { Text("Clear", style = MaterialTheme.typography.labelSmall, color = Color.Red) }
+                            Text("Backend Activity", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+                            if (!isPro) {
+                                Spacer(modifier = Modifier.width(8.dp))
+                                ProBadge()
+                            }
+                        }
+                        if (isPro) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text("Debug", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+                                Switch(
+                                    checked = settings.debugEnabled,
+                                    onCheckedChange = { viewModel.updateDebugEnabled(it) },
+                                    modifier = Modifier.scale(0.6f).padding(horizontal = 4.dp)
+                                )
+                                TextButton(onClick = { 
+                                    val text = consoleLogs.joinToString("\n") { "[${it.formattedTime}] ${it.tag}: ${it.message}" }
+                                    if (text.isNotBlank()) { clipboard.setText(AnnotatedString(text)); Toast.makeText(context, "Logs copied", Toast.LENGTH_SHORT).show() }
+                                }) { Text("Copy All", style = MaterialTheme.typography.labelSmall) }
+                                TextButton(onClick = { viewModel.clearConsole() }) { Text("Clear", style = MaterialTheme.typography.labelSmall, color = Color.Red) }
+                            }
                         }
                     }
-                    Box(modifier = Modifier.height(200.dp).fillMaxWidth()) {
-                        if (consoleLogs.isEmpty()) {
-                            Text("No activity recorded.", modifier = Modifier.align(Alignment.Center), style = MaterialTheme.typography.bodySmall, color = Color.DarkGray)
-                        } else {
-                            LazyColumn(modifier = Modifier.fillMaxSize()) {
-                                items(consoleLogs) { entry ->
-                                    Text(
-                                        text = "[${entry.formattedTime}] ${entry.tag}: ${entry.message}",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = when (entry.level) {
-                                            LogLevel.ERROR -> Color(0xFFFF5252)
-                                            LogLevel.WARN -> Color(0xFFFFD740)
-                                            else -> Color(0xFFB0BEC5)
-                                        },
-                                        modifier = Modifier.padding(vertical = 1.dp)
-                                    )
+                    if (isPro) {
+                        Box(modifier = Modifier.height(200.dp).fillMaxWidth()) {
+                            if (consoleLogs.isEmpty()) {
+                                Text("No activity recorded.", modifier = Modifier.align(Alignment.Center), style = MaterialTheme.typography.bodySmall, color = Color.DarkGray)
+                            } else {
+                                LazyColumn(modifier = Modifier.fillMaxSize()) {
+                                    items(consoleLogs) { entry ->
+                                        Text(
+                                            text = "[${entry.formattedTime}] ${entry.tag}: ${entry.message}",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = when (entry.level) {
+                                                LogLevel.ERROR -> Color(0xFFFF5252)
+                                                LogLevel.WARN -> Color(0xFFFFD740)
+                                                else -> Color(0xFFB0BEC5)
+                                            },
+                                            modifier = Modifier.padding(vertical = 1.dp)
+                                        )
+                                    }
                                 }
                             }
+                        }
+                    } else {
+                        Box(modifier = Modifier.height(100.dp).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                            Text("Technical Console is a Pro feature.", color = Color.DarkGray, style = MaterialTheme.typography.bodySmall)
                         }
                     }
                 }
@@ -635,8 +729,14 @@ fun SettingsScreen(viewModel: MainViewModel) {
 
         item {
             Column(modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                TextButton(onClick = onNavigateToPrivacy) {
+                    Text("Privacy Policy", color = ActionBlue)
+                }
+                Spacer(modifier = Modifier.height(8.dp))
                 Text("Call Guard Shield", style = MaterialTheme.typography.titleSmall)
                 Text("Version 1.0", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+                Spacer(modifier = Modifier.height(12.dp))
+                AppModeBadge(appMode)
             }
         }
         item { Spacer(modifier = Modifier.height(100.dp)) }

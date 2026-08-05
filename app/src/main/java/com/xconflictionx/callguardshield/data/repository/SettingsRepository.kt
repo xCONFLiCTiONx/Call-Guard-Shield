@@ -9,6 +9,8 @@ import kotlinx.coroutines.flow.map
 
 private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "settings")
 
+enum class AppTheme { SYSTEM, LIGHT, DARK }
+
 class SettingsRepository(private val context: Context) {
 
     private object PreferencesKeys {
@@ -33,6 +35,7 @@ class SettingsRepository(private val context: Context) {
         val WHITELIST_ENABLED = booleanPreferencesKey("whitelist_enabled")
         val BLACKLIST_ENABLED = booleanPreferencesKey("blacklist_enabled")
         val DEBUG_ENABLED = booleanPreferencesKey("debug_enabled")
+        val APP_THEME = stringPreferencesKey("app_theme")
     }
 
     val settingsFlow: Flow<UserSettings> = context.dataStore.data.map { preferences ->
@@ -57,7 +60,8 @@ class SettingsRepository(private val context: Context) {
             googleAccountEmail = preferences[PreferencesKeys.GOOGLE_ACCOUNT_EMAIL],
             whitelistEnabled = preferences[PreferencesKeys.WHITELIST_ENABLED] ?: false,
             blacklistEnabled = preferences[PreferencesKeys.BLACKLIST_ENABLED] ?: false,
-            debugEnabled = preferences[PreferencesKeys.DEBUG_ENABLED] ?: false
+            debugEnabled = preferences[PreferencesKeys.DEBUG_ENABLED] ?: false,
+            theme = AppTheme.valueOf(preferences[PreferencesKeys.APP_THEME] ?: AppTheme.SYSTEM.name)
         )
     }
 
@@ -141,6 +145,10 @@ class SettingsRepository(private val context: Context) {
         context.dataStore.edit { it[PreferencesKeys.DEBUG_ENABLED] = enabled }
     }
 
+    suspend fun updateTheme(theme: AppTheme) {
+        context.dataStore.edit { it[PreferencesKeys.APP_THEME] = theme.name }
+    }
+
     suspend fun updateGoogleAccountEmail(email: String?) {
         context.dataStore.edit { 
             if (email == null) it.remove(PreferencesKeys.GOOGLE_ACCOUNT_EMAIL)
@@ -167,6 +175,7 @@ class SettingsRepository(private val context: Context) {
             it[PreferencesKeys.WHITELIST_ENABLED] = s.whitelistEnabled
             it[PreferencesKeys.BLACKLIST_ENABLED] = s.blacklistEnabled
             it[PreferencesKeys.DEBUG_ENABLED] = s.debugEnabled
+            it[PreferencesKeys.APP_THEME] = s.theme.name
         }
     }
 }
@@ -192,5 +201,6 @@ data class UserSettings(
     val googleAccountEmail: String?,
     val whitelistEnabled: Boolean,
     val blacklistEnabled: Boolean,
-    val debugEnabled: Boolean
+    val debugEnabled: Boolean,
+    val theme: AppTheme
 )

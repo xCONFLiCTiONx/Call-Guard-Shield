@@ -42,13 +42,14 @@ fun NumberDetailsSheet(
     val isIdentifying by viewModel.isIdentifying.collectAsState()
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     
-    val blacklist by viewModel.blacklist.collectAsState()
-    val whitelist by viewModel.whitelist.collectAsState()
-    val isInBlacklist = blacklist.any { number.startsWith(it.pattern.removeSuffix("%")) }
-    val isInWhitelist = whitelist.any { it.number == number }
-    
     val groupedLogs by viewModel.groupedCallLogs.collectAsState()
     val currentGroup = groupedLogs.find { it.number == number }
+    
+    val isInBlacklist = currentGroup?.isInBlacklist ?: false
+    val isPrefixMatch = currentGroup?.isPrefixMatch ?: false
+    val isGlobalSpamMatch = currentGroup?.isGlobalSpamMatch ?: false
+    val isInWhitelist = currentGroup?.isInWhitelist ?: false
+    
     val timeline = currentGroup?.allTimestamps ?: emptyList()
 
     ModalBottomSheet(
@@ -112,6 +113,8 @@ fun NumberDetailsSheet(
                     
                     val (statusText, statusColor) = when {
                         isInBlacklist -> "🚫 CURRENTLY BLOCKED" to MaterialTheme.colorScheme.error
+                        isPrefixMatch -> "🚫 BLOCKED BY PREFIX" to MaterialTheme.colorScheme.error
+                        isGlobalSpamMatch -> "🚫 BLOCKED BY GLOBAL DB" to Color(0xFFFF5252)
                         isInWhitelist -> "🛡️ CURRENTLY ALLOWED" to Color(0xFF4CAF50)
                         else -> "⚖️ NO CUSTOM RULE" to Color.Gray
                     }

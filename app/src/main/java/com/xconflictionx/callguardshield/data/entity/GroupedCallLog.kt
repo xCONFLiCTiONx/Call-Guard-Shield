@@ -19,6 +19,8 @@ data class GroupedEnrichedCallLog(
     val isBlocked: Boolean,
     val isContact: Boolean,
     val isInBlacklist: Boolean,
+    val isPrefixMatch: Boolean, // Explicitly tracked for badge transparency
+    val isGlobalSpamMatch: Boolean, // Explicitly tracked
     val isInWhitelist: Boolean,
     val intel: PhoneLookupResult?
 )
