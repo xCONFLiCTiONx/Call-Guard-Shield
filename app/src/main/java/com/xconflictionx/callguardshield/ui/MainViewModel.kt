@@ -32,6 +32,15 @@ sealed class UiEvent {
     data class ShowToast(val message: String) : UiEvent()
 }
 
+// Internal data container to simplify flow combinations
+private data class ProtectionContext(
+    val blacklist: List<BlacklistEntry>,
+    val whitelist: List<WhitelistEntry>,
+    val cache: List<PhoneLookupResult>,
+    val globalSpam: List<GlobalSpamEntry>,
+    val query: String
+)
+
 class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val db = AppDatabase.getDatabase(application)
     private val dao = db.callGuardShieldDao()
@@ -88,12 +97,23 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     @OptIn(FlowPreview::class)
     private val debouncedSearchQuery = _searchQuery
-        .debounce(1000.milliseconds)
+        .debounce(500.milliseconds) // Snappier search response
         .stateIn(viewModelScope, SharingStarted.Eagerly, "")
 
     fun updateSearchQuery(query: String) {
         _searchQuery.value = query
     }
+
+    // Consolidated protection state to ensure stable UI updates
+    private val protectionContext = combine(
+        blacklist,
+        whitelist,
+        lookupCache,
+        globalSpamEntries,
+        debouncedSearchQuery
+    ) { bl, wl, cache, gs, query ->
+        ProtectionContext(bl, wl, cache, gs, query)
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, ProtectionContext(emptyList(), emptyList(), emptyList(), emptyList(), ""))
 
     // Unified helper for enriching any list of numbers with intel and call stats
     private fun enrichList(
@@ -173,42 +193,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    val blacklistFull = combine(blacklist, rawGroupedLogs, whitelist, lookupCache, globalSpamEntries, debouncedSearchQuery) { args: Array<Any> ->
-        val bl = args[0] as List<BlacklistEntry>
-        val stats = args[1] as List<RawGroupedLog>
-        val wl = args[2] as List<WhitelistEntry>
-        val cache = args[3] as List<PhoneLookupResult>
-        val gs = args[4] as List<GlobalSpamEntry>
-        val query = args[5] as String
-        enrichList(bl.map { it.pattern }, bl.associate { it.pattern to it.label }, stats, bl, wl, cache, gs, query)
+    val blacklistFull = protectionContext.combine(rawGroupedLogs) { ctx, stats ->
+        enrichList(ctx.blacklist.map { it.pattern }, ctx.blacklist.associate { it.pattern to it.label }, stats, ctx.blacklist, ctx.whitelist, ctx.cache, ctx.globalSpam, ctx.query)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    val whitelistFull = combine(whitelist, rawGroupedLogs, blacklist, lookupCache, globalSpamEntries, debouncedSearchQuery) { args: Array<Any> ->
-        val wl = args[0] as List<WhitelistEntry>
-        val stats = args[1] as List<RawGroupedLog>
-        val bl = args[2] as List<BlacklistEntry>
-        val cache = args[3] as List<PhoneLookupResult>
-        val gs = args[4] as List<GlobalSpamEntry>
-        val query = args[5] as String
-        enrichList(wl.map { it.number }, wl.associate { it.number to it.label }, stats, bl, wl, cache, gs, query)
+    val whitelistFull = protectionContext.combine(rawGroupedLogs) { ctx, stats ->
+        enrichList(ctx.whitelist.map { it.number }, ctx.whitelist.associate { it.number to it.label }, stats, ctx.blacklist, ctx.whitelist, ctx.cache, ctx.globalSpam, ctx.query)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    // Enriched & Grouped Call Logs
-    val groupedCallLogs = combine(
-        dao.getRawGroupedLogs(),
-        blacklist,
-        whitelist,
-        lookupCache,
-        globalSpamEntries,
-        debouncedSearchQuery
-    ) { args: Array<Any> ->
-        val rawLogs = args[0] as List<RawGroupedLog>
-        val bl = args[1] as List<BlacklistEntry>
-        val wl = args[2] as List<WhitelistEntry>
-        val cache = args[3] as List<PhoneLookupResult>
-        val gs = args[4] as List<GlobalSpamEntry>
-        val query = args[5] as String
-        enrichList(rawLogs.map { it.number }, emptyMap(), rawLogs, bl, wl, cache, gs, query)
+    // Enriched & Grouped Call Logs (The Search Fix)
+    val groupedCallLogs = rawGroupedLogs.combine(protectionContext) { logs, ctx ->
+        enrichList(logs.map { it.number }, emptyMap(), logs, ctx.blacklist, ctx.whitelist, ctx.cache, ctx.globalSpam, ctx.query)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val globalSpamCount = dao.getGlobalSpamCount().stateIn(viewModelScope, SharingStarted.Eagerly, 0)
