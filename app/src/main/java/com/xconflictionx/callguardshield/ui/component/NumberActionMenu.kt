@@ -3,7 +3,7 @@ package com.xconflictionx.callguardshield.ui.component
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ManageSearch
+import androidx.compose.material.icons.automirrored.filled.*
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -107,6 +107,20 @@ fun NumberActionMenu(
                 leadingContent = { Icon(Icons.Default.Edit, contentDescription = null) },
                 modifier = Modifier.clickable { 
                     onEditLabel?.invoke()
+                    onDismiss()
+                }
+            )
+
+            val groupedLogs by viewModel.groupedCallLogs.collectAsState()
+            val currentGroup = groupedLogs.find { it.number == number }
+            val currentIsBlocked = currentGroup?.isBlocked ?: false
+
+            ListItem(
+                headlineContent = { Text(if (currentIsBlocked) "Mark as Allowed" else "Mark as Blocked") },
+                supportingContent = { Text("Manually toggle the protection label for this number.") },
+                leadingContent = { Icon(Icons.AutoMirrored.Filled.CompareArrows, contentDescription = null) },
+                modifier = Modifier.clickable { 
+                    viewModel.toggleNumberBlockedStatus(number, currentIsBlocked)
                     onDismiss()
                 }
             )

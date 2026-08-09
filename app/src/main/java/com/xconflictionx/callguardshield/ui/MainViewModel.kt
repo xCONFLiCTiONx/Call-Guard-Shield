@@ -174,6 +174,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
 
+            val wasActuallyBlocked = stat?.isBlocked ?: false
+            val isSpamOrScam = intel?.scam == true || intel?.spam == true
+            
             GroupedEnrichedCallLog(
                 number = num,
                 label = rawLabel,
@@ -182,7 +185,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 allTimestamps = stat?.csvTimestamps?.split(",")?.mapNotNull { it.toLongOrNull() } ?: emptyList(),
                 headline = headline,
                 formattedInfo = formattedInfo,
-                isBlocked = stat?.isBlocked ?: (intel?.scam == true || intel?.spam == true || inBl || inGs),
+                isBlocked = (wasActuallyBlocked || isSpamOrScam || inBl || inGs) && !inWl,
                 isContact = false,
                 isInBlacklist = isExactBl,
                 isPrefixMatch = isPrefixBl,
@@ -284,7 +287,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 refreshBatteryStatus()
                 refreshLocationStatus()
                 scheduleMonthlySpamSync()
-                scheduleMonthlyMaintenance()
             } catch (e: Exception) {
                 logToConsole("SYSTEM", "Initialization error: ${e.message}", LogLevel.ERROR)
             }
@@ -339,18 +341,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private suspend fun handleNewIntelResult(number: String, newResult: PhoneLookupResult) {
-        val currentResult = dao.getLookupResult(number)
-        val currentAccuracy = currentResult?.accuracy ?: -1
-        val newAccuracy = newResult.accuracy
-
         // Always set pending so user can see what was found and manual button can show
         _pendingIntelResult.value = newResult
+        
+        // Removed auto-save logic. User MUST press "Update Saved Details" manually.
+    }
 
-        // Auto-save logic: ONLY if new accuracy is higher AND there is no manual override label
-        // However, we still keep it in pendingResult so the "Update" button can be shown if needed
-        if (newAccuracy > currentAccuracy && currentResult?.manualLabel == null) {
-            applyInvestigationResult(number, newResult)
-            _selectedNumberIntel.value = newResult
+    fun toggleNumberBlockedStatus(number: String, currentStatus: Boolean) {
+        viewModelScope.launch {
+            dao.updateCallLogBlockedStatus(number, !currentStatus)
         }
     }
 
@@ -564,7 +563,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun updateWhitelistEnabled(e: Boolean) { viewModelScope.launch { settingsRepo.updateWhitelistEnabled(e) } }
     fun updateBlacklistEnabled(e: Boolean) { viewModelScope.launch { settingsRepo.updateBlacklistEnabled(e) } }
     fun updateSelectedModel(m: String) { viewModelScope.launch { settingsRepo.updateSelectedGeminiModel(m) } }
-    fun updateAutoMaintenance(e: Boolean) { viewModelScope.launch { settingsRepo.updateAutoMaintenanceEnabled(e) } }
     fun updateDebugEnabled(e: Boolean) { viewModelScope.launch { settingsRepo.updateDebugEnabled(e) } }
     fun updateTheme(theme: AppTheme) { viewModelScope.launch { settingsRepo.updateTheme(theme) } }
     
@@ -578,7 +576,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
     fun clearGeminiKey() { viewModelScope.launch { CryptoManager.saveGeminiApiKey(getApplication(), ""); _apiKeyStatus.value = "Missing API Key"; _availableModels.value = emptyList() } }
     fun clearLookupCache() { viewModelScope.launch { dao.clearLookupCache() } }
-    fun runMaintenanceNow() { viewModelScope.launch { WorkManager.getInstance(getApplication()).enqueue(OneTimeWorkRequestBuilder<BulkIdentifyWorker>().setInputData(workDataOf("isMaintenance" to true)).build()) } }
     fun requestIgnoreBatteryOptimizations(c: Context) { try { c.startActivity(Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply { data = Uri.parse("package:${c.packageName}") }) } catch (e: Exception) { } }
     fun requestBackgroundLocation(c: Context) { try { c.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply { data = Uri.parse("package:${c.packageName}") }) } catch (e: Exception) { } }
     
@@ -710,15 +707,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 else dao.insertWhitelistEntry(WhitelistEntry(number = normalized, label = label ?: "Imported"))
             }
         }
-    }
-
-    private fun scheduleMonthlyMaintenance() {
-        val workRequest = PeriodicWorkRequestBuilder<BulkIdentifyWorker>(
-            30, java.util.concurrent.TimeUnit.DAYS
-        ).addTag("MONTHLY_MAINTENANCE").build()
-        WorkManager.getInstance(getApplication()).enqueueUniquePeriodicWork(
-            "MonthlyMaintenance", ExistingPeriodicWorkPolicy.KEEP, workRequest
-        )
     }
 
     private fun scheduleMonthlySpamSync() {

@@ -73,7 +73,7 @@ fun NumberDetailsSheet(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Box(modifier = Modifier.size(48.dp)) {
-                    if (onNavigatePrevious != null) {
+                    if (!isScannerMode && onNavigatePrevious != null) {
                         IconButton(onClick = onNavigatePrevious, modifier = Modifier.align(Alignment.Center)) {
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Previous", tint = MaterialTheme.colorScheme.primary)
                         }
@@ -87,8 +87,9 @@ fun NumberDetailsSheet(
                     color = MaterialTheme.colorScheme.onSurface
                 )
 
+                // Navigation Right
                 Box(modifier = Modifier.size(48.dp)) {
-                    if (onNavigateNext != null) {
+                    if (!isScannerMode && onNavigateNext != null) {
                         IconButton(onClick = onNavigateNext, modifier = Modifier.align(Alignment.Center)) {
                             Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = "Next", tint = MaterialTheme.colorScheme.primary)
                         }
@@ -111,11 +112,14 @@ fun NumberDetailsSheet(
                     Text(text = number, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     Spacer(modifier = Modifier.height(4.dp))
                     
+                    val isBlockedInHistory = currentGroup?.isBlocked ?: false
+                    
                     val (statusText, statusColor) = when {
+                        isInWhitelist -> "🛡️ CURRENTLY ALLOWED" to Color(0xFF4CAF50)
                         isInBlacklist -> "🚫 CURRENTLY BLOCKED" to MaterialTheme.colorScheme.error
                         isPrefixMatch -> "🚫 BLOCKED BY PREFIX" to MaterialTheme.colorScheme.error
                         isGlobalSpamMatch -> "🚫 BLOCKED BY GLOBAL DB" to Color(0xFFFF5252)
-                        isInWhitelist -> "🛡️ CURRENTLY ALLOWED" to Color(0xFF4CAF50)
+                        isBlockedInHistory -> "🚫 BLOCKED BY FIREWALL" to MaterialTheme.colorScheme.error
                         else -> "⚖️ NO CUSTOM RULE" to Color.Gray
                     }
                     

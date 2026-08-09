@@ -148,6 +148,12 @@ interface CallGuardShieldDao {
     @Query("SELECT number, COUNT(*) as count, MAX(timestamp) as lastTimestamp, GROUP_CONCAT(timestamp) as csvTimestamps, (SELECT isBlocked FROM call_log WHERE number = main.number ORDER BY timestamp DESC LIMIT 1) as isBlocked FROM call_log as main GROUP BY number ORDER BY lastTimestamp DESC")
     fun getRawGroupedLogs(): Flow<List<RawGroupedLog>>
 
+    @Query("SELECT COUNT(*) FROM call_log WHERE number = :number")
+    suspend fun getCallLogCountSync(number: String): Int
+
+    @Query("UPDATE call_log SET isBlocked = :blocked WHERE number = :number")
+    suspend fun updateCallLogBlockedStatus(number: String, blocked: Boolean)
+
     @Query("DELETE FROM call_log WHERE id = :id")
     suspend fun deleteCallLogById(id: Long)
 

@@ -42,7 +42,10 @@ class CallGuardShieldService : CallScreeningService() {
                 
                 // 2. Real-Time AI Screening & Background Identification
                 var aiResult: com.xconflictionx.callguardshield.data.entity.PhoneLookupResult? = null
-                if (!isContact && phoneNumber != null) {
+                val normalizedIncoming = phoneNumber?.let { PhoneHelper.normalizeToE164(it) } ?: ""
+                val callCount = if (normalizedIncoming.isNotBlank()) dao.getCallLogCountSync(normalizedIncoming) else 0
+
+                if (!isContact && phoneNumber != null && callCount == 0) {
                     val apiKey = CryptoManager.getGeminiApiKey(applicationContext)
                     if (!apiKey.isNullOrBlank()) {
                         // Start the scan immediately

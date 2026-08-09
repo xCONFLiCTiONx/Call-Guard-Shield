@@ -545,26 +545,6 @@ fun SettingsScreen(
         }
 
         if (isPro && apiKeyStatus == "Connected") {
-            item {
-                Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))) {
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        SettingToggle(title = "Auto-Refresh Intel (30 Days)", description = "Automatically re-scan lists every month to verify status.", checked = settings.autoMaintenanceEnabled, onCheckedChange = { viewModel.updateAutoMaintenance(it) })
-                        HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp), color = Color.Gray.copy(alpha = 0.2f))
-                        val lastMaint = settings.lastMaintenanceTime
-                        val maintText = if (lastMaint == 0L) "Never refreshed" else "Last re-scan: " + SimpleDateFormat("MMM dd, HH:mm", Locale.getDefault()).format(Date(lastMaint))
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                            Text(maintText, style = MaterialTheme.typography.bodySmall, color = Color.Gray)
-                            Button(
-                                onClick = { viewModel.runMaintenanceNow() }, 
-                                shape = MaterialTheme.shapes.small,
-                                colors = ButtonDefaults.buttonColors(containerColor = ActionBlue, contentColor = Color.White)
-                            ) { 
-                                Text("Run Now", style = MaterialTheme.typography.labelSmall) 
-                            }
-                        }
-                    }
-                }
-            }
             item { Text("AI Protection", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold) }
             item {
                 Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))) {
