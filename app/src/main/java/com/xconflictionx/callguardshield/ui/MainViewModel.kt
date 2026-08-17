@@ -89,7 +89,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val whitelist = dao.getWhitelist().stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
     
     private val lookupCache = dao.getAllLookupResultsFlow()
-    private val rawGroupedLogs = dao.getRawGroupedLogs()
+    val rawGroupedLogs = dao.getRawGroupedLogs().stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
     private val globalSpamEntries = dao.getAllGlobalSpamEntries().stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     private val _searchQuery = MutableStateFlow("")
@@ -130,7 +130,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         
         return numbers.mapNotNull { num ->
             val intel = cache.find { it.phoneNumber == num }
-            val stat = stats.find { it.number == num }
+            
+            // Support pattern-based aggregation for Blacklist/Whitelist entries
+            val matchingStats = stats.filter { PhoneHelper.isMatch(it.number, num) }
+            val totalCount = matchingStats.sumOf { it.count }
+            val lastTs = matchingStats.maxOfOrNull { it.lastTimestamp } ?: 0L
+            val allTs = matchingStats
+                .flatMap { it.csvTimestamps.split(",").mapNotNull { t -> t.toLongOrNull() } }
+                .sortedDescending()
+            val wasActuallyBlocked = matchingStats.any { it.isBlocked }
+
             val matchBl = bl.find { PhoneHelper.isMatch(num, it.pattern) }
             val inBl = matchBl != null
             val inWl = wl.any { PhoneHelper.isExactMatch(num, it.number) }
@@ -174,15 +183,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
 
-            val wasActuallyBlocked = stat?.isBlocked ?: false
             val isSpamOrScam = intel?.scam == true || intel?.spam == true
             
             GroupedEnrichedCallLog(
                 number = num,
                 label = rawLabel,
-                count = stat?.count ?: 0,
-                lastTimestamp = stat?.lastTimestamp ?: 0L,
-                allTimestamps = stat?.csvTimestamps?.split(",")?.mapNotNull { it.toLongOrNull() } ?: emptyList(),
+                count = totalCount,
+                lastTimestamp = lastTs,
+                allTimestamps = allTs,
                 headline = headline,
                 formattedInfo = formattedInfo,
                 isBlocked = (wasActuallyBlocked || isSpamOrScam || inBl || inGs) && !inWl,
@@ -196,16 +204,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    val blacklistFull = protectionContext.combine(rawGroupedLogs) { ctx, stats ->
+    val blacklistFull = combine(protectionContext, rawGroupedLogs) { ctx, stats ->
         enrichList(ctx.blacklist.map { it.pattern }, ctx.blacklist.associate { it.pattern to it.label }, stats, ctx.blacklist, ctx.whitelist, ctx.cache, ctx.globalSpam, ctx.query)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    val whitelistFull = protectionContext.combine(rawGroupedLogs) { ctx, stats ->
+    val whitelistFull = combine(protectionContext, rawGroupedLogs) { ctx, stats ->
         enrichList(ctx.whitelist.map { it.number }, ctx.whitelist.associate { it.number to it.label }, stats, ctx.blacklist, ctx.whitelist, ctx.cache, ctx.globalSpam, ctx.query)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     // Enriched & Grouped Call Logs (The Search Fix)
-    val groupedCallLogs = rawGroupedLogs.combine(protectionContext) { logs, ctx ->
+    val groupedCallLogs = combine(rawGroupedLogs, protectionContext) { logs, ctx ->
         enrichList(logs.map { it.number }, emptyMap(), logs, ctx.blacklist, ctx.whitelist, ctx.cache, ctx.globalSpam, ctx.query)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 

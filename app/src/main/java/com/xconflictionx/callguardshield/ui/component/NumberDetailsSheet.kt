@@ -17,6 +17,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.xconflictionx.callguardshield.data.entity.PhoneLookupResult
+import com.xconflictionx.callguardshield.logic.PhoneHelper
 import com.xconflictionx.callguardshield.ui.MainViewModel
 import java.text.SimpleDateFormat
 import java.util.*
@@ -43,14 +44,20 @@ fun NumberDetailsSheet(
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     
     val groupedLogs by viewModel.groupedCallLogs.collectAsState()
-    val currentGroup = groupedLogs.find { it.number == number }
     
-    val isInBlacklist = currentGroup?.isInBlacklist ?: false
-    val isPrefixMatch = currentGroup?.isPrefixMatch ?: false
-    val isGlobalSpamMatch = currentGroup?.isGlobalSpamMatch ?: false
-    val isInWhitelist = currentGroup?.isInWhitelist ?: false
-    
-    val timeline = currentGroup?.allTimestamps ?: emptyList()
+    // Aggregate matching logs for timeline/stats in details sheet (supports patterns)
+    val matchingGroups = groupedLogs.filter { PhoneHelper.isMatch(it.number, number) }
+    val timeline = matchingGroups.flatMap { it.allTimestamps }.sortedDescending()
+
+    // Check custom lists specifically for this number/pattern
+    val blacklist by viewModel.blacklist.collectAsState()
+    val whitelist by viewModel.whitelist.collectAsState()
+
+    val isInBlacklist = blacklist.any { PhoneHelper.isExactMatch(number, it.pattern) }
+    val isPrefixMatch = blacklist.any { !PhoneHelper.isExactMatch(number, it.pattern) && PhoneHelper.isMatch(number, it.pattern) }
+    val isInWhitelist = whitelist.any { PhoneHelper.isExactMatch(number, it.number) }
+    val isGlobalSpamMatch = matchingGroups.any { it.isGlobalSpamMatch }
+    val isBlockedInHistory = matchingGroups.any { it.isBlocked }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -111,8 +118,6 @@ fun NumberDetailsSheet(
                     }
                     Text(text = number, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     Spacer(modifier = Modifier.height(4.dp))
-                    
-                    val isBlockedInHistory = currentGroup?.isBlocked ?: false
                     
                     val (statusText, statusColor) = when {
                         isInWhitelist -> "🛡️ CURRENTLY ALLOWED" to Color(0xFF4CAF50)

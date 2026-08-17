@@ -66,7 +66,7 @@ object PhoneHelper {
      */
     fun isMatch(number: String, pattern: String): Boolean {
         val n = cleanForComparison(number)
-        val p = cleanForComparison(pattern).removeSuffix("%")
+        val p = cleanForComparison(pattern).removeSuffix("*").removeSuffix("%")
         if (n.isEmpty() || p.isEmpty()) return false
         return n.startsWith(p)
     }
@@ -76,13 +76,18 @@ object PhoneHelper {
      */
     fun isExactMatch(number: String, pattern: String): Boolean {
         val n = cleanForComparison(number)
-        val p = cleanForComparison(pattern).removeSuffix("%")
+        val p = cleanForComparison(pattern).removeSuffix("*").removeSuffix("%")
         return n == p
     }
 
     private fun cleanForComparison(input: String): String {
+        // Remove all non-digits
         val digits = input.filter { it.isDigit() }
-        return if (digits.startsWith("1") && digits.length > 10) {
+        
+        // Robust US prefix handling: if it's 11 digits starting with 1, it's definitely +1 prefix.
+        // If it's shorter, but starts with 1, we still strip it for comparison if it's likely a prefix.
+        // Area codes in the US (NANP) never start with 1.
+        return if (digits.startsWith("1") && digits.length >= 4) {
             digits.substring(1)
         } else {
             digits

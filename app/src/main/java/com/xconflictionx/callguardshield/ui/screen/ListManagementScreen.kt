@@ -286,6 +286,7 @@ fun BlacklistTab(
                         ownerName = entry.intel?.ownerName,
                         companyName = entry.intel?.companyName,
                         isBlocked = true,
+                        timestamp = entry.lastTimestamp,
                         callerInfo = entry.formattedInfo,
                         onClick = { 
                             selectedIndex = index
@@ -426,6 +427,7 @@ fun WhitelistTab(
                         ownerName = entry.intel?.ownerName,
                         companyName = entry.intel?.companyName,
                         isBlocked = false,
+                        timestamp = entry.lastTimestamp,
                         callerInfo = entry.formattedInfo,
                         onClick = { 
                             selectedIndex = index
