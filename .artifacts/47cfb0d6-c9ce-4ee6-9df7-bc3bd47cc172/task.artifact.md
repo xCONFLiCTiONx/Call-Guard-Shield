@@ -1,2 +1,0 @@
-- [x] Fix unresolved reference in `MainViewModel.kt`
-- [x] Verify fix with gradle build

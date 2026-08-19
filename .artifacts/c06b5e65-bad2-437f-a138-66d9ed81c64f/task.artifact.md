@@ -1,5 +1,0 @@
-- [x] Enhance `WebSearchHelper.kt` with carrier/owner queries and deeper snippet extraction
-- [x] Upgrade `NumberIntelEngine.kt` with reputation scoring and carrier detection (Google Voice, etc.)
-- [x] Refactor `MainViewModel.kt` for resilient parallel lookups with individual timeouts and live status updates
-- [x] Verify functionality with various number types (Spam, Google Voice, Business)
-- [x] Finalize walkthrough
