@@ -9,15 +9,12 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.xconflictionx.callguardshield.data.entity.PhoneLookupResult
-import com.xconflictionx.callguardshield.logic.AppMode
 import com.xconflictionx.callguardshield.ui.MainViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -39,8 +36,6 @@ fun NumberActionMenu(
 ) {
     val clipboardManager = LocalClipboardManager.current
     var showLabelDialog by remember { mutableStateOf<LabelDialogType?>(null) }
-    val appMode by viewModel.appMode.collectAsState()
-    val isPro = appMode == AppMode.PRO || appMode == AppMode.DEBUG
     
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
@@ -76,17 +71,12 @@ fun NumberActionMenu(
                 headlineContent = { 
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text("Look up number with AI")
-                        if (!isPro) {
-                            Spacer(modifier = Modifier.width(8.dp))
-                            ProBadge()
-                        }
                     }
                 },
                 supportingContent = { Text("Research identity and reputation with Gemini.") },
-                leadingContent = { Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = if (isPro) MaterialTheme.colorScheme.primary else Color.Gray) },
+                leadingContent = { Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
                 modifier = Modifier
-                    .alpha(if (isPro) 1f else 0.5f)
-                    .clickable(enabled = isPro) { 
+                    .clickable { 
                         onOpenScanner()
                         onDismiss()
                     }

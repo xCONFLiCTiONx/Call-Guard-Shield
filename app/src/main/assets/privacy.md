@@ -8,7 +8,6 @@ Call Guard Shield is committed to protecting your privacy. This Privacy Policy o
 ### Local Call and Device Data
 *   **Call State and Logs**: The app accesses incoming call states and local call logs solely to compare numbers against your local blocklists and provide real-time filtering functionality.
 *   **Contacts Data**: The app accesses your device's contacts solely to identify "Verified Contacts" and allow them to bypass the firewall. Your contact information is processed locally on your device and is **not** uploaded to our servers or shared with any third party, including Gemini AI.
-*   **Location Information**: Call Guard Shield requests access to your device's location (including in the background) to determine your current state or region. This is used strictly to power the "Out of State" blocking feature. This data is processed locally and is never tracked, stored on a server, or shared.
 *   **Local Database**: Any blacklists, whitelists, or custom rules you configure are stored locally on your device.
 
 ### Gemini Intelligence Lookups

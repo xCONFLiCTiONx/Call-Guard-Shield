@@ -8,8 +8,6 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
@@ -26,8 +24,6 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.compose.currentBackStackEntryAsState
-import com.xconflictionx.callguardshield.logic.LicenseManager
-import com.xconflictionx.callguardshield.logic.LicenseStatus
 import com.xconflictionx.callguardshield.ui.MainViewModel
 import com.xconflictionx.callguardshield.ui.screen.*
 import com.xconflictionx.callguardshield.ui.theme.CallGuardShieldTheme
@@ -44,43 +40,20 @@ class MainActivity : ComponentActivity() {
             val viewModel: MainViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
             val settings by viewModel.settings.collectAsState()
             
-            var licenseStatus by remember { mutableStateOf<LicenseStatus?>(null) }
-            
-            LaunchedEffect(Unit) {
-                val status = LicenseManager.checkLicense(context)
-                licenseStatus = status
-                if (status is LicenseStatus.Valid) {
-                    viewModel.setAppMode(status.mode)
-                }
-            }
-
             CallGuardShieldTheme(
                 appTheme = settings.theme
             ) {
-                when (val status = licenseStatus) {
-                    null -> {
-                        // Splash/Loading state
-                        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                            CircularProgressIndicator()
+                var showMainApp by remember { mutableStateOf(checkAllPermissions(context)) }
+                
+                if (!showMainApp) {
+                    PermissionScreen(
+                        onRequestRole = { requestCallScreeningRole() },
+                        onContinue = { 
+                            showMainApp = true
                         }
-                    }
-                    is LicenseStatus.Valid -> {
-                        var showMainApp by remember { mutableStateOf(checkAllPermissions(context)) }
-                        
-                        if (!showMainApp) {
-                            PermissionScreen(
-                                onRequestRole = { requestCallScreeningRole() },
-                                onContinue = { 
-                                    showMainApp = true
-                                }
-                            )
-                        } else {
-                            MainApp(viewModel)
-                        }
-                    }
-                    is LicenseStatus.Invalid -> {
-                        PurchaseRequiredScreen(status.message)
-                    }
+                    )
+                } else {
+                    MainApp(viewModel)
                 }
             }
         }

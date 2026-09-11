@@ -17,7 +17,6 @@ class SettingsRepository(private val context: Context) {
         val IS_PAUSED = booleanPreferencesKey("is_paused")
         val ALLOW_ONLY_CONTACTS = booleanPreferencesKey("allow_only_contacts")
         val BLOCK_UNKNOWN = booleanPreferencesKey("block_unknown")
-        val BLOCK_OUT_OF_STATE = booleanPreferencesKey("block_out_of_state")
         val BLOCK_INTERNATIONAL = booleanPreferencesKey("block_international")
         val FIRST_RUN_SYNC_COMPLETE = booleanPreferencesKey("first_run_sync_complete")
         val ENABLED_DICTIONARIES = stringSetPreferencesKey("enabled_dictionaries")
@@ -43,7 +42,6 @@ class SettingsRepository(private val context: Context) {
             isPaused = preferences[PreferencesKeys.IS_PAUSED] ?: false,
             allowOnlyContacts = preferences[PreferencesKeys.ALLOW_ONLY_CONTACTS] ?: false,
             blockUnknown = preferences[PreferencesKeys.BLOCK_UNKNOWN] ?: false,
-            blockOutOfState = preferences[PreferencesKeys.BLOCK_OUT_OF_STATE] ?: false,
             blockInternational = preferences[PreferencesKeys.BLOCK_INTERNATIONAL] ?: false,
             firstRunSyncComplete = preferences[PreferencesKeys.FIRST_RUN_SYNC_COMPLETE] ?: false,
             enabledDictionaries = preferences[PreferencesKeys.ENABLED_DICTIONARIES] ?: emptySet(),
@@ -75,10 +73,6 @@ class SettingsRepository(private val context: Context) {
 
     suspend fun updateBlockUnknown(block: Boolean) {
         context.dataStore.edit { it[PreferencesKeys.BLOCK_UNKNOWN] = block }
-    }
-
-    suspend fun updateBlockOutOfState(block: Boolean) {
-        context.dataStore.edit { it[PreferencesKeys.BLOCK_OUT_OF_STATE] = block }
     }
 
     suspend fun updateBlockInternational(block: Boolean) {
@@ -161,7 +155,6 @@ class SettingsRepository(private val context: Context) {
             it[PreferencesKeys.IS_PAUSED] = s.isPaused
             it[PreferencesKeys.ALLOW_ONLY_CONTACTS] = s.allowOnlyContacts
             it[PreferencesKeys.BLOCK_UNKNOWN] = s.blockUnknown
-            it[PreferencesKeys.BLOCK_OUT_OF_STATE] = s.blockOutOfState
             it[PreferencesKeys.BLOCK_INTERNATIONAL] = s.blockInternational
             it[PreferencesKeys.ENABLED_DICTIONARIES] = s.enabledDictionaries
             it[PreferencesKeys.SHOW_CONTACTS_IN_HISTORY] = s.showContactsInHistory
@@ -184,7 +177,6 @@ data class UserSettings(
     val isPaused: Boolean,
     val allowOnlyContacts: Boolean,
     val blockUnknown: Boolean,
-    val blockOutOfState: Boolean,
     val blockInternational: Boolean,
     val firstRunSyncComplete: Boolean,
     val enabledDictionaries: Set<String>,

@@ -13,7 +13,6 @@ import com.xconflictionx.callguardshield.data.entity.*
         BlockedCall::class,
         BlacklistEntry::class,
         WhitelistEntry::class,
-        AreaCodeBlock::class,
         CallLogEntry::class,
         PrefixBlock::class,
         GlobalSpamEntry::class,

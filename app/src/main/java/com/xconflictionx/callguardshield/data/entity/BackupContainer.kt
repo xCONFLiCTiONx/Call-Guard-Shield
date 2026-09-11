@@ -10,7 +10,6 @@ data class BackupContainer(
     val whitelist: List<WhitelistEntry> = emptyList(),
     val callLogs: List<CallLogEntry> = emptyList(),
     val blockedCalls: List<BlockedCall> = emptyList(),
-    val areaCodeBlocks: List<AreaCodeBlock> = emptyList(),
     val prefixBlocks: List<PrefixBlock> = emptyList(),
     val lookupCache: List<PhoneLookupResult> = emptyList(),
     val geminiApiKey: String? = null,

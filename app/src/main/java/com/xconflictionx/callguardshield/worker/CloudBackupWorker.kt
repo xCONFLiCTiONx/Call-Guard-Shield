@@ -53,7 +53,6 @@ class CloudBackupWorker(
                     whitelist = dao.getWhitelistSync(),
                     callLogs = dao.getAllCallLogsSync(),
                     blockedCalls = dao.getAllBlockedCallsSync(),
-                    areaCodeBlocks = dao.getAreaCodeBlocksSync(),
                     prefixBlocks = dao.getPrefixBlocksSync(),
                     lookupCache = dao.getAllLookupResultsSync(),
                     geminiApiKey = CryptoManager.getGeminiApiKey(context),
@@ -86,7 +85,6 @@ class CloudBackupWorker(
                     container.whitelist.forEach { dao.insertWhitelistEntry(it) }
                     container.callLogs.forEach { dao.insertCallLogEntry(it) }
                     container.blockedCalls.forEach { dao.insertBlockedCall(it) }
-                    container.areaCodeBlocks.forEach { dao.insertAreaCodeBlock(it) }
                     container.prefixBlocks.forEach { dao.insertPrefixBlock(it) }
                     container.lookupCache.forEach { dao.insertLookupResult(it) }
                     

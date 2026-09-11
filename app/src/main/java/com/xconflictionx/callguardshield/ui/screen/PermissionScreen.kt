@@ -42,11 +42,6 @@ fun PermissionScreen(
         // State to track all permissions
         var contactsGranted by remember { mutableStateOf(hasPermission(context, android.Manifest.permission.READ_CONTACTS)) }
         
-        var locationFineGranted by remember { mutableStateOf(hasPermission(context, android.Manifest.permission.ACCESS_FINE_LOCATION)) }
-        var locationBackgroundGranted by remember { 
-            mutableStateOf(if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) hasPermission(context, android.Manifest.permission.ACCESS_BACKGROUND_LOCATION) else true) 
-        }
-        
         var phoneStateGranted by remember { mutableStateOf(hasPermission(context, android.Manifest.permission.READ_PHONE_STATE)) }
         var notificationsGranted by remember { mutableStateOf(if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) hasPermission(context, android.Manifest.permission.POST_NOTIFICATIONS) else true) }
         var roleGranted by remember { mutableStateOf(checkCallScreeningRole(context)) }
@@ -66,8 +61,6 @@ fun PermissionScreen(
             val observer = LifecycleEventObserver { _, event ->
                 if (event == Lifecycle.Event.ON_RESUME) {
                     contactsGranted = hasPermission(context, android.Manifest.permission.READ_CONTACTS)
-                    locationFineGranted = hasPermission(context, android.Manifest.permission.ACCESS_FINE_LOCATION)
-                    locationBackgroundGranted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) hasPermission(context, android.Manifest.permission.ACCESS_BACKGROUND_LOCATION) else true
                     phoneStateGranted = hasPermission(context, android.Manifest.permission.READ_PHONE_STATE)
                     notificationsGranted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) hasPermission(context, android.Manifest.permission.POST_NOTIFICATIONS) else true
                     roleGranted = checkCallScreeningRole(context)
@@ -81,10 +74,6 @@ fun PermissionScreen(
             ActivityResultContracts.RequestMultiplePermissions()
         ) { result ->
             contactsGranted = result[android.Manifest.permission.READ_CONTACTS] ?: contactsGranted
-            locationFineGranted = result[android.Manifest.permission.ACCESS_FINE_LOCATION] ?: locationFineGranted
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                locationBackgroundGranted = result[android.Manifest.permission.ACCESS_BACKGROUND_LOCATION] ?: locationBackgroundGranted
-            }
             phoneStateGranted = result[android.Manifest.permission.READ_PHONE_STATE] ?: phoneStateGranted
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 notificationsGranted = result[android.Manifest.permission.POST_NOTIFICATIONS] ?: notificationsGranted
@@ -92,7 +81,7 @@ fun PermissionScreen(
             roleGranted = checkCallScreeningRole(context)
         }
 
-        val basePermissionsGranted = contactsGranted && locationFineGranted && locationBackgroundGranted && phoneStateGranted && notificationsGranted
+        val basePermissionsGranted = contactsGranted && phoneStateGranted && notificationsGranted
         val allGranted = basePermissionsGranted && (roleGranted || !roleAvailable)
 
         // Auto-trigger Call Screening role request when base permissions are granted
@@ -117,7 +106,6 @@ fun PermissionScreen(
                             onClick = {
                                 val permissionsList = mutableListOf(
                                     android.Manifest.permission.READ_CONTACTS,
-                                    android.Manifest.permission.ACCESS_FINE_LOCATION,
                                     android.Manifest.permission.READ_PHONE_STATE,
                                     android.Manifest.permission.READ_CALL_LOG,
                                     android.Manifest.permission.ANSWER_PHONE_CALLS,
@@ -205,29 +193,6 @@ fun PermissionScreen(
                         launcher.launch(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS))
                     }
                 }
-
-                val locationStatus = when {
-                    locationFineGranted && locationBackgroundGranted -> true // Green
-                    locationFineGranted -> false // Trigger Yellow warning
-                    else -> false // Trigger Red denied
-                }
-                
-                PermissionItem(
-                    title = "Location", 
-                    description = "Required for regional blocking.", 
-                    granted = locationStatus,
-                    warning = locationFineGranted && !locationBackgroundGranted
-                ) { 
-                    if (locationFineGranted && !locationBackgroundGranted) {
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                            launcher.launch(arrayOf(android.Manifest.permission.ACCESS_BACKGROUND_LOCATION))
-                        }
-                    } else if (locationStatus) {
-                        openSettings()
-                    } else {
-                        launcher.launch(arrayOf(android.Manifest.permission.ACCESS_FINE_LOCATION))
-                    }
-                }
                 
                 if (roleAvailable) {
                     PermissionItem(
@@ -307,10 +272,5 @@ fun checkAllPermissions(context: Context): Boolean {
         hasPermission(context, android.Manifest.permission.POST_NOTIFICATIONS)
     } else true
     
-    val locationFine = hasPermission(context, android.Manifest.permission.ACCESS_FINE_LOCATION)
-    val locationBg = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-        hasPermission(context, android.Manifest.permission.ACCESS_BACKGROUND_LOCATION)
-    } else true
-    
-    return contacts && phone && notifications && locationFine && locationBg && checkCallScreeningRole(context)
+    return contacts && phone && notifications && checkCallScreeningRole(context)
 }

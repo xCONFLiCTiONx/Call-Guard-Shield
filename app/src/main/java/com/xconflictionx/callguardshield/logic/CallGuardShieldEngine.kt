@@ -10,7 +10,6 @@ class CallGuardShieldEngine(
     private val context: Context,
     private val dao: CallGuardShieldDao
 ) {
-    private val locationManager = LocationManager(context)
 
     suspend fun shouldBlock(phoneNumber: String?, settings: UserSettings): BlockResult {
         if (settings.isPaused) return BlockResult.Allow(isContact = false)
@@ -62,20 +61,7 @@ class CallGuardShieldEngine(
             }
         }
 
-        // 6. Dynamic "Out of State" Blocking
-        val areaCode = extractAreaCode(phoneNumber)
-        if (areaCode != null) {
-            if (settings.blockOutOfState) {
-                val callerState = AreaCodeManager.getStateForAreaCode(areaCode)
-                val myState = locationManager.getCurrentState() ?: "Arkansas" // Default to AR if location fails
-                
-                if (callerState != null && callerState != myState) {
-                    return BlockResult.Block("Out of State ($callerState)", isContact = false)
-                }
-            }
-        }
-
-        // 7. International Blocking
+        // 6. International Blocking
         if (settings.blockInternational && isInternational(phoneNumber)) {
             return BlockResult.Block("International Call", isContact = false)
         }
@@ -95,14 +81,6 @@ class CallGuardShieldEngine(
         } catch (e: Exception) {
             false
         }
-    }
-
-    private fun extractAreaCode(number: String): String? {
-        val normalized = PhoneNumberUtils.normalizeNumber(number)
-        val cleanNumber = if (normalized.startsWith("+1")) normalized.substring(2) else normalized
-        return if (cleanNumber.length >= 10) {
-            cleanNumber.substring(0, 3)
-        } else null
     }
 
     private fun isInternational(number: String): Boolean {

@@ -1,5 +1,6 @@
 package com.xconflictionx.callguardshield.ui.component
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -13,6 +14,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.xconflictionx.callguardshield.data.entity.CallLogEntry
+import com.xconflictionx.callguardshield.data.entity.GroupedEnrichedCallLog
 import com.xconflictionx.callguardshield.ui.MainViewModel
 import java.text.SimpleDateFormat
 import java.util.*
@@ -26,7 +28,6 @@ fun SecurityStatusSheet(
     val settings by viewModel.settings.collectAsState()
     val apiKeyStatus by viewModel.apiKeyStatus.collectAsState()
     val suggestions by viewModel.securitySuggestions.collectAsState()
-    val appMode by viewModel.appMode.collectAsState()
     
     val dateFormatter = SimpleDateFormat("MMM dd, HH:mm", Locale.getDefault())
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -64,7 +65,6 @@ fun SecurityStatusSheet(
                             color = Color.Gray
                         )
                     }
-                    AppModeBadge(appMode)
                 }
             }
 
@@ -120,7 +120,6 @@ fun SecurityStatusSheet(
                     ShieldStatusItem("Manual Whitelist Enforced", settings.whitelistEnabled)
                     ShieldStatusItem("Unknown ID Blocking", settings.blockUnknown)
                     ShieldStatusItem("Strict Contact-Only Mode", settings.allowOnlyContacts)
-                    ShieldStatusItem("Regional Out-of-State Blocking", settings.blockOutOfState)
                     ShieldStatusItem("International Blocking", settings.blockInternational)
                 }
             }
@@ -210,13 +209,13 @@ fun ShieldStatusItem(label: String, isActive: Boolean) {
 
 @Composable
 fun ThreatSuggestionItem(
-    threat: com.xconflictionx.callguardshield.data.entity.GroupedEnrichedCallLog,
+    threat: GroupedEnrichedCallLog,
     onBlock: () -> Unit
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.1f)),
-        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.2f))
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.2f))
     ) {
         Row(
             modifier = Modifier.padding(12.dp),

@@ -55,7 +55,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             isPaused = false,
             allowOnlyContacts = false,
             blockUnknown = false,
-            blockOutOfState = false,
             blockInternational = false,
             firstRunSyncComplete = false,
             enabledDictionaries = emptySet(),
@@ -77,14 +76,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         )
     )
 
-    private val _appMode = MutableStateFlow(AppMode.EVALUATION)
-    val appMode = _appMode.asStateFlow()
-
-    fun setAppMode(mode: AppMode) {
-        _appMode.value = mode
-    }
-
-    val callLogs = dao.getAllCallLogs().stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
     val blacklist = dao.getBlacklist().stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
     val whitelist = dao.getWhitelist().stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
     
@@ -261,9 +252,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _isIgnoringBatteryOptimizations = MutableStateFlow(false)
     val isIgnoringBatteryOptimizations = _isIgnoringBatteryOptimizations.asStateFlow()
 
-    private val _backgroundLocationGranted = MutableStateFlow(false)
-    val backgroundLocationGranted = _backgroundLocationGranted.asStateFlow()
-
     val geminiStage = StatusManager.geminiStage
     val driveError = StatusManager.driveError
 
@@ -293,7 +281,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 testGeminiKey()
                 refreshGeminiModels()
                 refreshBatteryStatus()
-                refreshLocationStatus()
                 scheduleMonthlySpamSync()
             } catch (e: Exception) {
                 logToConsole("SYSTEM", "Initialization error: ${e.message}", LogLevel.ERROR)
@@ -541,9 +528,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun togglePause() { viewModelScope.launch { settingsRepo.updateIsPaused(!(settings.value.isPaused)) } }
     fun connectGoogleAccount(email: String) { viewModelScope.launch { settingsRepo.updateGoogleAccountEmail(email); _isGoogleDriveConnected.value = true } }
     fun disconnectGoogleDrive() { viewModelScope.launch { settingsRepo.updateGoogleAccountEmail(null); _isGoogleDriveConnected.value = false } }
-    fun updateSetting(blockOutOfState: Boolean? = null, blockInternational: Boolean? = null, showContactsInHistory: Boolean? = null, allowOnlyContacts: Boolean? = null, blockUnknown: Boolean? = null) {
+    fun updateSetting(blockInternational: Boolean? = null, showContactsInHistory: Boolean? = null, allowOnlyContacts: Boolean? = null, blockUnknown: Boolean? = null) {
         viewModelScope.launch {
-            blockOutOfState?.let { settingsRepo.updateBlockOutOfState(it) }
             blockInternational?.let { settingsRepo.updateBlockInternational(it) }
             showContactsInHistory?.let { settingsRepo.updateShowContactsInHistory(it) }
             allowOnlyContacts?.let { settingsRepo.updateAllowOnlyContacts(it) }
@@ -585,17 +571,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun clearGeminiKey() { viewModelScope.launch { CryptoManager.saveGeminiApiKey(getApplication(), ""); _apiKeyStatus.value = "Missing API Key"; _availableModels.value = emptyList() } }
     fun clearLookupCache() { viewModelScope.launch { dao.clearLookupCache() } }
     fun requestIgnoreBatteryOptimizations(c: Context) { try { c.startActivity(Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply { data = Uri.parse("package:${c.packageName}") }) } catch (e: Exception) { } }
-    fun requestBackgroundLocation(c: Context) { try { c.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply { data = Uri.parse("package:${c.packageName}") }) } catch (e: Exception) { } }
     
-    fun refreshLocationStatus() {
-        try {
-            val context = getApplication<Application>()
-            val hasFine = ContextCompat.checkSelfPermission(context, android.Manifest.permission.ACCESS_FINE_LOCATION) == android.content.pm.PackageManager.PERMISSION_GRANTED
-            val hasBg = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) ContextCompat.checkSelfPermission(context, android.Manifest.permission.ACCESS_BACKGROUND_LOCATION) == android.content.pm.PackageManager.PERMISSION_GRANTED else true
-            _backgroundLocationGranted.value = hasFine && hasBg
-        } catch (e: Exception) { }
-    }
-
     fun refreshBatteryStatus() {
         try {
             val context = getApplication<Application>()
@@ -654,7 +630,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val container = BackupContainer(
                 blacklist = dao.getBlacklistSync(), whitelist = dao.getWhitelistSync(),
                 callLogs = dao.getAllCallLogsSync(), blockedCalls = dao.getAllBlockedCallsSync(),
-                areaCodeBlocks = dao.getAreaCodeBlocksSync(), prefixBlocks = dao.getPrefixBlocksSync(),
+                prefixBlocks = dao.getPrefixBlocksSync(),
                 lookupCache = dao.getAllLookupResultsSync(), geminiApiKey = key,
                 settings = settings.value
             )
@@ -687,7 +663,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         container.whitelist.forEach { dao.insertWhitelistEntry(it) }
         container.callLogs.forEach { dao.insertCallLogEntry(it) }
         container.blockedCalls.forEach { dao.insertBlockedCall(it) }
-        container.areaCodeBlocks.forEach { dao.insertAreaCodeBlock(it) }
         container.prefixBlocks.forEach { dao.insertPrefixBlock(it) }
         container.lookupCache.forEach { dao.insertLookupResult(it) }
 

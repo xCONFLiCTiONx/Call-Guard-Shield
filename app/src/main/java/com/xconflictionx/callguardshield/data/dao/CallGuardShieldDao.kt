@@ -71,19 +71,6 @@ interface CallGuardShieldDao {
     @Delete
     suspend fun deleteWhitelistEntry(entry: WhitelistEntry)
 
-    // Area Code Blocks
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun insertAreaCodeBlock(block: AreaCodeBlock)
-
-    @Query("SELECT * FROM area_code_blocks")
-    fun getAreaCodeBlocks(): Flow<List<AreaCodeBlock>>
-
-    @Query("SELECT * FROM area_code_blocks")
-    suspend fun getAreaCodeBlocksSync(): List<AreaCodeBlock>
-
-    @Delete
-    suspend fun deleteAreaCodeBlock(block: AreaCodeBlock)
-
     // Prefix Blocks
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertPrefixBlock(block: PrefixBlock)
@@ -213,10 +200,6 @@ interface CallGuardShieldDao {
         
         findBlacklistMatch(number)?.let {
             sb.append("- Found in your Blacklist (Matches your blocked patterns).\n")
-        }
-        
-        findGlobalSpamByPattern(number)?.let {
-            sb.append("- Found in Verified Spam Database: ${it.label}\n")
         }
         
         if (sb.length < 50) sb.append("- No matches found in local database.\n")

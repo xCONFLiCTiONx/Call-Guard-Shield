@@ -15,8 +15,6 @@ android {
         targetSdk = 35
         versionCode = 1
         versionName = "1.0"
-        
-        buildConfigField("boolean", "BYPASS_LICENSE_CHECK", "true")
     }
 
     buildTypes {
@@ -28,7 +26,6 @@ android {
                 "proguard-rules.pro"
             )
             signingConfig = signingConfigs.getByName("debug")
-            buildConfigField("boolean", "BYPASS_LICENSE_CHECK", "false")
         }
     }
     lint {
@@ -88,10 +85,6 @@ dependencies {
 
     // Markdown
     implementation(libs.compose.markdown)
-
-    // Location
-    implementation(libs.play.services.location)
-    implementation(libs.kotlinx.coroutines.play.services)
 
     // Google Sign-In & Credentials
     implementation(libs.play.services.auth)
