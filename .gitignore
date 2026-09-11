@@ -15,3 +15,7 @@
 local.properties
 .artifacts
 .idea
+app/keystore/
+app/keystore
+app/debug
+app/release
